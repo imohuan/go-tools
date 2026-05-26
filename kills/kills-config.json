@@ -1,0 +1,17 @@
+{
+  "port": 17890,
+  "profiles": [
+    {
+      "id": "90abaccc-f42b-4f8f-9c9c-c4da2d113f85",
+      "name": "默认配置",
+      "processes": [
+        "Microsoft 365 Copilot",
+        "M365Copilot.exe",
+        "msedge.exe",
+        "msedgewebview2.exe",
+        "ACE-Tray.exe"
+      ]
+    }
+  ],
+  "activeProfileId": "90abaccc-f42b-4f8f-9c9c-c4da2d113f85"
+}

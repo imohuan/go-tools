@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>进程终结器</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>进程终结器</h1>
+      <p class="subtitle">多套配置 · 一键结束进程</p>
+    </header>
+
+    <section class="toolbar">
+      <label class="profile-label" for="profileSelect">当前配置</label>
+      <select id="profileSelect"></select>
+      <input type="text" id="profileName" placeholder="配置名称" />
+      <button type="button" id="btnAdd" class="secondary">新建</button>
+      <button type="button" id="btnDelete" class="danger secondary">删除</button>
+      <button type="button" id="btnSave" class="secondary">保存</button>
+    </section>
+
+    <section class="search-panel">
+      <label for="processSearch">搜索运行中的进程</label>
+      <div class="search-row">
+        <input type="text" id="processSearch" placeholder="输入进程名关键字，回车或点击搜索" autocomplete="off" />
+        <button type="button" id="btnSearch" class="secondary">搜索</button>
+      </div>
+      <p class="search-hint">点击结果可加入下方列表（已存在则跳过）</p>
+      <ul id="searchResults" class="search-results hidden"></ul>
+    </section>
+
+    <section class="editor">
+      <label for="processList">进程名称（每行一个，可带或不带 .exe）</label>
+      <textarea id="processList" spellcheck="false" placeholder="例如：&#10;chrome.exe&#10;node&#10;Code.exe"></textarea>
+    </section>
+
+    <section class="actions">
+      <button type="button" id="btnKill" class="primary">Kill 全部进程</button>
+      <span id="status" class="status"></span>
+    </section>
+
+    <section class="log-panel">
+      <h2>执行结果</h2>
+      <pre id="log"></pre>
+    </section>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

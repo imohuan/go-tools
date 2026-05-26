@@ -1,0 +1,282 @@
+:root {
+  --bg: #0f1419;
+  --surface: #1a2332;
+  --border: #2d3a4f;
+  --text: #e7ecf3;
+  --muted: #8b9cb3;
+  --accent: #e74c3c;
+  --accent-hover: #c0392b;
+  --ok: #2ecc71;
+  --warn: #f39c12;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: linear-gradient(160deg, #0f1419 0%, #1a2332 100%);
+  color: var(--text);
+}
+
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+}
+
+header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 1.5rem 0 1rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.profile-label {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+select,
+input[type="text"] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+#profileSelect {
+  min-width: 140px;
+}
+
+#profileName {
+  flex: 1;
+  min-width: 120px;
+}
+
+.search-panel {
+  margin-bottom: 1rem;
+}
+
+.search-panel label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.search-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+#processSearch {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+}
+
+.search-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.search-results {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.search-results.hidden {
+  display: none;
+}
+
+.search-results li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+
+.search-results li:last-child {
+  border-bottom: none;
+}
+
+.search-results li:hover {
+  background: rgba(231, 76, 60, 0.12);
+}
+
+.search-results li .name {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  color: var(--text);
+}
+
+.search-results li .meta {
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.search-results .empty {
+  padding: 0.75rem;
+  color: var(--muted);
+  cursor: default;
+  justify-content: center;
+}
+
+.search-results .empty:hover {
+  background: transparent;
+}
+
+.editor label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+textarea {
+  width: 100%;
+  min-height: 320px;
+  padding: 1rem;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  resize: vertical;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.2);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  padding: 0.65rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: background 0.15s, transform 0.1s;
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+.primary {
+  background: var(--accent);
+  color: #fff;
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
+}
+
+.primary:hover {
+  background: var(--accent-hover);
+}
+
+.secondary {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.secondary:hover {
+  background: var(--border);
+}
+
+.danger:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.status.ok {
+  color: var(--ok);
+}
+
+.status.err {
+  color: var(--accent);
+}
+
+.log-panel {
+  margin-top: 2rem;
+}
+
+.log-panel h2 {
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-weight: 500;
+  margin: 0 0 0.5rem;
+}
+
+#log {
+  margin: 0;
+  padding: 1rem;
+  min-height: 120px;
+  max-height: 240px;
+  overflow: auto;
+  background: #0a0e12;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+
+#log .ok {
+  color: var(--ok);
+}
+
+#log .fail {
+  color: var(--accent);
+}
