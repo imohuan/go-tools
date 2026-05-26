@@ -111,8 +111,8 @@ func Collect() (*Snapshot, error) {
 		})
 	}
 	sort.Slice(apps, func(i, j int) bool { return apps[i].MemMB > apps[j].MemMB })
-	if len(apps) > 18 {
-		apps = apps[:18]
+	if len(apps) > 30 {
+		apps = apps[:30]
 	}
 
 	sysCPU := systemAgg.cpu
