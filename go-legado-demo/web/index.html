@@ -1,0 +1,134 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Go + Legado 演示</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-900 min-h-screen">
+  <div id="app" class="max-w-5xl mx-auto p-4"></div>
+  <script>
+    const { createApp, ref, onMounted, computed } = Vue;
+    const getPage = () => (location.hash.split('?')[0] || '#home').replace('#', '');
+    const getQ = (k) => new URLSearchParams(location.hash.split('?')[1] || '').get(k) || '';
+    const to = (p, q={}) => { const s = new URLSearchParams(q).toString(); location.hash = s ? `${p}?${s}` : p; };
+
+    createApp({
+      setup() {
+        const page = ref('home');
+        const sources = ref([]);
+        const sourceIndex = ref(0);
+        const key = ref('斗破');
+        const list = ref([]);
+        const book = ref(null);
+        const chapter = ref('');
+        const debugInfo = ref(null);
+        const err = ref('');
+        const loading = ref(false);
+
+        const currentSource = computed(() => sources.value[sourceIndex.value] || null);
+
+        const api = async (u) => {
+          const r = await fetch(u); const d = await r.json();
+          if (!r.ok) throw new Error(d.error || '请求失败');
+          return d;
+        };
+
+        const loadSources = async () => {
+          const data = await api('/api/sources');
+          sources.value = data.list || [];
+        };
+
+        const search = async () => {
+          loading.value = true; err.value='';
+          try {
+            const data = await api('/api/search?debug=1&sourceIndex=' + sourceIndex.value + '&key=' + encodeURIComponent(key.value));
+            list.value = data.list || [];
+            debugInfo.value = data.debug || null;
+          } catch(e){ err.value=e.message } finally{ loading.value=false }
+        };
+
+        const loadBook = async () => {
+          const u = getQ('url'); const si = Number(getQ('sourceIndex') || sourceIndex.value);
+          if(!u) return;
+          sourceIndex.value = si;
+          loading.value = true; err.value='';
+          try {
+            const qName = getQ('name');
+            const qAuthor = getQ('author');
+            const qIntro = getQ('intro');
+            book.value = await api('/api/book?sourceIndex=' + si + '&url=' + encodeURIComponent(u) + '&name=' + encodeURIComponent(qName) + '&author=' + encodeURIComponent(qAuthor) + '&intro=' + encodeURIComponent(qIntro));
+          }
+          catch(e){err.value=e.message} finally{loading.value=false}
+        };
+
+        const loadChapter = async () => {
+          const u=getQ('url'); const si = Number(getQ('sourceIndex') || sourceIndex.value);
+          if(!u) return;
+          sourceIndex.value = si;
+          loading.value=true; err.value='';
+          try { chapter.value = (await api('/api/chapter?sourceIndex=' + si + '&url=' + encodeURIComponent(u))).content || ''; }
+          catch(e){err.value=e.message} finally{loading.value=false}
+        };
+
+        const sync = async () => {
+          page.value = getPage() || 'home';
+          if (page.value==='detail') await loadBook();
+          if (page.value==='chapter') await loadChapter();
+        };
+
+        onMounted(async()=>{
+          await loadSources();
+          if(!location.hash) to('home');
+          await sync();
+          window.addEventListener('hashchange', sync);
+        });
+
+        return { page, sources, sourceIndex, currentSource, key, list, book, chapter, debugInfo, err, loading, to, getQ, search };
+      },
+      template: `
+        <div class="space-y-4">
+          <div class="bg-white rounded-xl p-4 shadow flex justify-between items-center">
+            <div><div class="text-xl font-bold">Go + Legado 演示</div><div class="text-sm text-slate-500">首页 / 搜索 / 详情 / 正文</div></div>
+            <div class="space-x-2"><button class="px-3 py-1 bg-slate-800 text-white rounded" @click="to('home')">首页</button><button class="px-3 py-1 bg-blue-600 text-white rounded" @click="to('search')">搜索</button></div>
+          </div>
+
+          <div class="bg-white rounded-xl p-3 text-sm shadow space-y-2">
+            <div>书源选择：</div>
+            <select v-model.number="sourceIndex" class="border rounded px-2 py-1 w-full md:w-[420px]">
+              <option v-for="s in sources" :key="s.index" :value="s.index">[{{s.index}}] {{s.name}}（{{s.url}}）</option>
+            </select>
+            <div v-if="currentSource">当前：{{currentSource.name}}（{{currentSource.url}}）</div>
+          </div>
+
+          <div v-if="loading" class="bg-amber-50 text-amber-700 p-3 rounded">加载中...</div>
+          <div v-if="err" class="bg-red-50 text-red-700 p-3 rounded">{{err}}</div>
+          <pre v-if="debugInfo" class="bg-slate-900 text-slate-100 p-3 rounded text-xs overflow-auto">{{JSON.stringify(debugInfo,null,2)}}</pre>
+          <div v-if="debugInfo" class="text-xs text-slate-600 bg-slate-50 border rounded p-2">
+            本地调试文件目录：D:\\CodeX\\go-legado-demo\\debug_logs\\(当天日期)\\
+          </div>
+
+          <div v-if="page==='home'" class="bg-white rounded-xl p-6 shadow"><button class="px-4 py-2 bg-blue-600 text-white rounded" @click="to('search')">开始搜索</button></div>
+
+          <div v-if="page==='search'" class="space-y-3">
+            <div class="bg-white rounded-xl p-4 shadow flex gap-2"><input v-model="key" class="flex-1 border rounded px-3 py-2" @keyup.enter="search" placeholder="输入关键字" /><button class="px-4 py-2 bg-blue-600 text-white rounded" @click="search">搜索</button></div>
+            <div class="grid gap-3"><div v-for="it in list" :key="it.url" class="bg-white rounded-xl p-4 shadow"><div class="font-semibold">{{it.name}}</div><div class="text-sm text-slate-600">作者：{{it.author||'未知'}}</div><div class="text-sm text-slate-500 mt-1">{{it.intro}}</div><button class="mt-2 px-3 py-1 bg-slate-800 text-white rounded" @click="to('detail',{url:it.url,sourceIndex:it.sourceIndex,name:it.name||'',author:it.author||'',intro:it.intro||''})">看详情</button></div></div>
+          </div>
+
+          <div v-if="page==='detail' && book" class="space-y-3">
+            <div class="bg-white rounded-xl p-4 shadow"><div class="text-xl font-bold">{{book.name}}</div><div class="text-sm text-slate-600">作者：{{book.author||'未知'}}</div><img v-if="book.cover" :src="book.cover" class="w-28 mt-3 rounded" /><p class="mt-3 text-sm leading-6">{{book.intro}}</p></div>
+            <div class="bg-white rounded-xl p-4 shadow"><div class="font-semibold mb-2">章节（{{book.chapters?.length||0}}）</div><div class="max-h-[60vh] overflow-auto space-y-2"><button v-for="c in book.chapters" :key="c.url" class="w-full text-left border rounded px-3 py-2 hover:bg-slate-50" @click="to('chapter',{url:c.url,title:c.name,sourceIndex:book.sourceIndex})">{{c.name}}</button></div></div>
+          </div>
+
+          <div v-if="page==='chapter'" class="bg-white rounded-xl p-4 shadow">
+            <h3 class="text-lg font-semibold mb-3">{{getQ('title')||'正文'}}</h3>
+            <div class="whitespace-pre-wrap leading-8">{{chapter || '暂无内容'}}</div>
+          </div>
+        </div>
+      `
+    }).mount('#app')
+  </script>
+</body>
+</html>

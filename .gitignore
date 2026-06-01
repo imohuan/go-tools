@@ -2,3 +2,4 @@ output/
 dist/
 *.exe
 .env
+debug_logs
