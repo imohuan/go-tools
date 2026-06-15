@@ -217,6 +217,20 @@
             class="w-18 px-1.5 py-0.5 text-center text-body-sm bg-surface-container-low border border-outline-variant rounded text-on-surface"
             title="吸附阈值（像素，距底部小于此值自动吸附）" />
           <span class="text-[10px] text-on-surface-variant">px</span>
+          <span class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 transition-colors duration-300"
+            :class="isSnapped ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]' : 'bg-outline-variant'"
+            :title="isSnapped ? '已吸附：新消息自动滚到底部' : '未吸附：距底部 > ' + scrollThreshold + 'px'"></span>
+        </template>
+
+        <!-- 调试按钮：仅 ?debug=true 时显示 -->
+        <template v-if="debugMode">
+          <span class="text-outline-variant">|</span>
+          <button @click="debugInsertData"
+            class="flex items-center gap-1 px-2 py-0.5 rounded text-body-sm font-medium bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 transition-colors"
+            title="模拟无感插入数据，测试吸附+滚动">
+            <span class="material-symbols-outlined text-[14px]">bug_report</span>
+            <span class="hidden sm:inline">模拟插入</span>
+          </button>
         </template>
       </div>
     </header>
@@ -320,7 +334,7 @@
       </aside>
 
       <!-- ====== 右侧对话区 ====== -->
-      <section class="flex-1 flex flex-col overflow-hidden bg-surface-container-lowest min-w-0">
+      <section class="flex-1 flex flex-col overflow-hidden bg-surface-container-lowest min-w-0 relative">
 
         <!-- 空状态 -->
         <div v-if="!activeConv" class="flex-1 flex items-center justify-center">
@@ -364,11 +378,11 @@
           </div>
 
           <!-- 消息列表 -->
-          <div class="flex-1 overflow-y-auto px-3 md:px-5 py-3 md:py-4 space-y-3 relative" ref="msgContainer"
+          <div class="flex-1 overflow-y-auto px-3 md:px-5 py-3 md:py-4 space-y-3" ref="msgContainer"
             @scroll="onMsgScroll">
             <!-- 滚动按钮（固定在消息区域右下角） -->
             <div v-if="activeConv"
-              class="sticky bottom-0 m-2 right-0 float-right clear-both z-10 flex flex-col gap-1 pointer-events-none">
+              class="absolute bottom-0 m-2 right-0 float-right clear-both z-10 flex flex-col gap-1 pointer-events-none">
               <button @click.stop="scrollToTop"
                 class="pointer-events-auto w-8 h-8 flex items-center justify-center rounded-full bg-surface-container-high border border-outline-variant/50 shadow-sm hover:bg-surface-container-highest transition-colors"
                 title="滚动到顶部">
@@ -513,9 +527,11 @@
         const projectTimestamps = reactive({})        // {projectName: maxTS} 用于增量刷新
 
         const autoRefresh = ref(true)
+        const debugMode = ref((new URLSearchParams(window.location.search)).get('debug') === 'true')
         const refreshInterval = ref(5)
         const autoScroll = ref(true)
         const scrollThreshold = ref(80)
+        const isSnapped = ref(false)           // 吸附状态：距底部 < 阈值时为 true
         const displayCount = ref(50)
         const isLoadingMore = ref(false)
         const allToolsCollapsed = ref(false)
@@ -580,20 +596,27 @@
             }))
 
             if (isIncremental && newConvs.length > 0) {
-              // 增量合并：用 sessionId 去重
-              const existing = projectConvCache[name] || []
-              const existingIds = new Set(existing.map(c => c.sessionId))
-              const merged = [...existing]
-              let added = 0
+              // 增量合并：用 sessionId 去重，已有项原地更新属性（保留对象引用）
+              const existing = (projectConvCache[name] || []).slice()
+              const existingIdx = new Map(existing.map((c, i) => [c.sessionId, i]))
+              let changed = false, addedCount = 0, updatedCount = 0
               for (const c of newConvs) {
-                if (!existingIds.has(c.sessionId)) {
-                  merged.push(c)
-                  added++
+                const idx = existingIdx.get(c.sessionId)
+                if (idx !== undefined) {
+                  // 已存在：原地更新属性，不替换对象引用（activeConv 等依赖同一引用）
+                  Object.assign(existing[idx], c)
+                  changed = true
+                  updatedCount++
+                } else {
+                  existing.push(c)
+                  changed = true
+                  addedCount++
                 }
               }
-              if (added > 0) {
-                merged.sort((a, b) => b.timestamp - a.timestamp)
-                projectConvCache[name] = merged
+              console.log('[refreshProjectConvs] 增量合并:', { project: name, total: newConvs.length, added: addedCount, updated: updatedCount, cacheSize: existing.length })
+              if (changed) {
+                existing.sort((a, b) => b.timestamp - a.timestamp)
+                projectConvCache[name] = existing
               }
             } else {
               // 全量刷新
@@ -657,6 +680,9 @@
 
         async function loadAndRender(conv, isSubAgent, isRefresh) {
           let text, isIncremental = false
+          // 增量刷新前捕获吸附状态（数据插入前），在函数顶层声明以便闭包访问
+          let wasSnapped = false
+          console.log('[loadAndRender] 入口:', { sessionId: conv.sessionId, isSubAgent, isRefresh, firstCall: !conv._lastTs, isSnapped: isSnapped.value, autoScroll: autoScroll.value })
           if (isSubAgent) {
             text = conv._cachedContent
           } else {
@@ -670,11 +696,16 @@
             const res = await fetch(url)
             const json = await res.json()
             if (!json.success) return
-            const newText = json.data.filter(Boolean).messages.map(m => JSON.stringify(m)).join('\n')
+            const newText = (json.data.messages || [])?.filter(Boolean).map(m => JSON.stringify(m)).join('\n')
+            const msgCount = (json.data.messages || []).length
+            console.log('[loadAndRender] 数据返回:', { isIncremental, msgCount, newTextLen: newText.length, newestTs: json.data.newest_ts, url })
             // 保存最新时间戳
             if (json.data.newest_ts) conv._lastTs = json.data.newest_ts
 
             if (isIncremental) {
+              // 数据插入前捕获吸附状态
+              wasSnapped = isSnapped.value
+              console.log('[loadAndRender] 增量模式, 插入前捕获吸附:', { wasSnapped, newTextLength: newText.length, newMsgCount: newText ? newText.split('\n').length : 0, cachedBefore: (conv._cachedContent || '').length })
               // 增量模式：拼接新消息到缓存末尾（无新消息时保持原样）
               if (newText) conv._cachedContent = (conv._cachedContent || '') + '\n' + newText
             } else {
@@ -725,11 +756,28 @@
           activeConvData.value = { nodes: allNodes, idMap, conv, text, discoveredSubs }
           if (!isSubAgent) mainDiscoveredSubs.value = discoveredSubs
 
-          // 如果自动滚动启用，渲染后滚到底部
+          // 渲染后滚动策略
+          // - 增量刷新：若 autoScroll 开启 且 刷新前处于吸附状态 → 带过渡滚动到底部（新数据无损插入）
+          // - 全量加载：若 autoScroll 开启 → 瞬间滚动到底部
+          // 双 nextTick + rAF 确保 Vue 渲染 + 布局完成后再滚动
           nextTick(() => {
-            if (msgContainer.value && autoScroll.value) {
-              msgContainer.value.scrollTop = msgContainer.value.scrollHeight
-            }
+            nextTick(() => {
+              requestAnimationFrame(() => {
+                if (!msgContainer.value) return
+                if (isIncremental) {
+                  console.log('[滚动] 增量刷新检查:', { wasSnapped, autoScroll: autoScroll.value, scrollHeight: msgContainer.value.scrollHeight, scrollTop: msgContainer.value.scrollTop })
+                  if (autoScroll.value && wasSnapped) {
+                    console.log('[滚动] smooth scrollTo bottom — 先 capture wasSnapped=' + wasSnapped + ' → 现在数据已插入')
+                    msgContainer.value.scrollTo({ top: msgContainer.value.scrollHeight, behavior: 'smooth' })
+                  }
+                } else {
+                  if (autoScroll.value) {
+                    console.log('[滚动] 全量加载 scrollTop=scrollHeight:', msgContainer.value.scrollHeight)
+                    msgContainer.value.scrollTop = msgContainer.value.scrollHeight
+                  }
+                }
+              })
+            })
           })
         }
 
@@ -918,9 +966,12 @@
           const projectName = activeConv.value.projectName || activeConv.value._projectName
           if (!projectName) return
 
+          console.log('[刷新] refreshActiveConversation 开始, isSnapped=' + isSnapped.value + ', autoScroll=' + autoScroll.value)
+
           // 第一步：获取项目下更新的对话列表（增量）
           const ts = projectTimestamps[projectName] || 0
           await refreshProjectConvs(projectName, ts, true)
+          console.log('[刷新] refreshProjectConvs 完成, conversations 条数=' + conversations.value.length)
 
           // 第二步：刷新当前对话详情（增量，如果已加载过则带 since；首次则全量）
           if (activeConv.value._lastTs) {
@@ -934,7 +985,12 @@
         function onMsgScroll() {
           if (!msgContainer.value) return
           const el = msgContainer.value
-          autoScroll.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < scrollThreshold.value
+          const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+          const prevSnapped = isSnapped.value
+          isSnapped.value = dist < scrollThreshold.value
+          if (prevSnapped !== isSnapped.value) {
+            console.log('[吸附] 状态变化:', { prevSnapped, isSnapped: isSnapped.value, dist, threshold: scrollThreshold.value, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight })
+          }
           if (el.scrollTop < 180 && !isLoadingMore.value && !loadMoreTimer) {
             loadMoreTimer = setTimeout(() => { loadMoreTimer = null; loadMoreMessages() }, 300)
           }
@@ -948,6 +1004,100 @@
         function scrollToBottom() {
           if (!msgContainer.value) return
           msgContainer.value.scrollTo({ top: msgContainer.value.scrollHeight, behavior: 'smooth' })
+        }
+
+        /* ===== 调试：模拟无感插入数据 ===== */
+        function debugInsertData() {
+          console.log('[调试] ========== 按钮点击 ==========')
+          console.log('[调试] activeConv:', activeConv.value ? activeConv.value.sessionId : 'null')
+          console.log('[调试] activeConvData:', activeConvData.value ? (activeConvData.value.nodes || []).length + ' nodes' : 'null')
+          console.log('[调试] isSnapped:', isSnapped.value, 'autoScroll:', autoScroll.value, 'scrollThreshold:', scrollThreshold.value, 'displayCount:', displayCount.value)
+
+          if (!activeConv.value) {
+            console.warn('[调试] ❌ 无活跃对话，忽略')
+            alert('调试：没有选中的对话，请先在左侧选择一个对话')
+            return
+          }
+          if (!activeConvData.value) {
+            console.warn('[调试] ❌ 无渲染数据，忽略')
+            alert('调试：对话数据未加载，请等待加载完成')
+            return
+          }
+
+          try {
+          const ts = Date.now()
+          const seq = Math.floor(Math.random() * 1000)
+          // 每次插入 3 组对话（6 条），带明显标记
+          const fakeLines = []
+          for (let k = 0; k < 3; k++) {
+            const uid = 'debug-' + ts + '-' + seq + '-u' + k
+            const aid = 'debug-' + ts + '-' + seq + '-a' + k
+            fakeLines.push(
+              JSON.stringify({ id: uid, type: 'message', role: 'user', content: '<user_query>🔧【调试插入 #' + (k+1) + '】' + new Date().toLocaleTimeString() + ' — 测试无感刷新</user_query>', timestamp: ts + k * 10 }),
+              JSON.stringify({ id: aid, type: 'message', role: 'assistant', parentId: uid, content: '✅ 调试回复 #' + (k+1) + '：isSnapped=' + isSnapped.value + ' autoScroll=' + autoScroll.value, timestamp: ts + k * 10 + 1 }),
+            )
+          }
+          const newText = fakeLines.join('\n')
+
+          console.log('[调试] 模拟插入 ' + fakeLines.length + ' 条消息')
+
+          // 捕获吸附状态
+          const wasSnapped = isSnapped.value
+
+          // 数据插入：追加到缓存
+          const conv = activeConv.value
+          conv._cachedContent = (conv._cachedContent || '') + '\n' + newText
+
+          // 重新解析全部节点
+          const rawLines = conv._cachedContent.trim().split('\n')
+          const parsedLines = [], idMap = {}, childrenMap = {}, skipTypes = new Set(['file-history-snapshot', 'reasoning'])
+          for (let i = 0; i < rawLines.length; i++) {
+            try { var d = JSON.parse(rawLines[i]) } catch (e) { continue }
+            if (!d || !d.id || skipTypes.has(d.type)) continue
+            parsedLines.push(d)
+            idMap[d.id] = d
+            const pid = d.parentId || '__root__'
+            if (!childrenMap[pid]) childrenMap[pid] = []
+            childrenMap[pid].push(d)
+          }
+
+          const allNodes = [], visited = new Set()
+          function dfs(id) {
+            const d = idMap[id]
+            if (!d || visited.has(id)) return
+            visited.add(id)
+            renderNode(d, allNodes, 0)
+            const children = childrenMap[id]
+            if (children) children.forEach(child => dfs(child.id))
+          }
+          const roots = childrenMap['__root__'] || []
+          roots.forEach(d => dfs(d.id))
+          for (const d of parsedLines) { if (visited.has(d.id)) continue; dfs(d.id) }
+
+          // 关键：expand displayCount 确保新数据可见，不被 slice 截掉
+          displayCount.value = Math.max(displayCount.value, allNodes.length)
+          console.log('[调试] displayCount 已扩大至:', displayCount.value, '(nodes=' + allNodes.length + ')')
+
+          // 更新渲染数据
+          activeConvData.value = { nodes: allNodes, idMap, conv, text: conv._cachedContent, discoveredSubs: activeConvData.value.discoveredSubs || [] }
+
+          console.log('[调试] 数据插入完成, 总 nodes=' + allNodes.length + ', wasSnapped=' + wasSnapped)
+
+          // 双 nextTick + rAF 后强制滚到底部
+          nextTick(() => {
+            nextTick(() => {
+              requestAnimationFrame(() => {
+                if (!msgContainer.value) return
+                const el = msgContainer.value
+                console.log('[调试] 强制 scrollTo bottom, scrollHeight=' + el.scrollHeight)
+                el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+              })
+            })
+          })
+          } catch (e) {
+            console.error('[调试] 异常:', e)
+            alert('调试异常: ' + (e.message || e))
+          }
         }
 
         function loadMoreMessages() {
@@ -1023,7 +1173,9 @@
 
         async function refreshCurrentView() {
           if (!activeConv.value) return
+          console.log('[refreshCurrentView] 触发, isSnapped=' + isSnapped.value + ', autoScroll=' + autoScroll.value)
           const collapsedMap = snapshotCollapsed(activeConvData.value?.nodes || [])
+          const wasSnapped = isSnapped.value
           if (currentSessionId.value === activeConv.value.sessionId) {
             await loadAndRender(activeConv.value, false, true)
           } else {
@@ -1033,7 +1185,14 @@
           const nodes = activeConvData.value?.nodes || []
           await nextTick()
           restoreCollapsed(activeConvData.value?.nodes || [], collapsedMap)
-          setTimeout(() => { if (msgContainer.value && autoScroll.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }, 300)
+          // 若 autoScroll 开启且刷新前处于吸附状态 → 带过渡滚动到底部
+          if (autoScroll.value && wasSnapped && msgContainer.value) {
+            setTimeout(() => {
+              if (msgContainer.value) {
+                msgContainer.value.scrollTo({ top: msgContainer.value.scrollHeight, behavior: 'smooth' })
+              }
+            }, 50)
+          }
         }
 
         watch(autoRefresh, v => v ? startAutoRefresh() : stopAutoRefresh())
@@ -1058,12 +1217,13 @@
           currentSessionId, msgContainer, searchQuery, loading, totalConvs,
           expandedProjects, projectConvCache, sidebarCollapsed, sidebarOpen,
           filteredProjects, sidebarItems, renderedMessages, agentTags,
-          autoRefresh, refreshInterval, autoScroll, scrollThreshold, displayCount,
+          autoRefresh, refreshInterval, autoScroll, scrollThreshold, isSnapped, debugMode, displayCount,
           allToolsCollapsed,
           loadProjects, toggleProject, isProjectCollapsed,
           selectConversation, jumpToSubAgent, switchToAgent,
           renderMarkdown, onMsgScroll,
           refreshCurrentView, toggleAllTools, formatToolArgs, scrollToTop, scrollToBottom,
+          debugInsertData,
         }
       }
     })

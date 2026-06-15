@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -120,7 +121,41 @@ func extractLastUserText(jsonlPath string, maxLen int) string {
 }
 
 // extractContentTextUntyped 提取所有 content 块的文本（不区分 type）
+// 会自动剥离 <system-reminder>、<user_info> 等注入标签，
+// 并优先提取 <user_query> 中的实际用户输入
 func extractContentTextUntyped(content interface{}) string {
+	raw := extractRawText(content)
+	if raw == "" {
+		return ""
+	}
+
+	// 1. 优先提取 <user_query> 标签中的实际用户输入
+	qmRe := regexp.MustCompile(`(?s)<user_query>\s*(.*?)\s*</user_query>`)
+	if m := qmRe.FindStringSubmatch(raw); m != nil && strings.TrimSpace(m[1]) != "" {
+		return strings.TrimSpace(m[1])
+	}
+
+	// 2. 剥离注入的 system-reminder 块
+	sysRe := regexp.MustCompile(`(?s)<system-reminder[^>]*>.*?</system-reminder>`)
+	cleaned := sysRe.ReplaceAllString(raw, "")
+
+	// 3. 剥离 <user_info>, <project_context>, <additional_data> 等大块注入
+	blockRe := regexp.MustCompile(`(?s)<(user_info|project_context|additional_data|memory_and_skills_reminder|connector-status|user_custom_instructions|identity_context|product_identity|tone_and_style|instructions_for_visualizer|visualizer_examples|task_management|asking_questions|tool_usage_policy|agent_skills|expert_management|mcp_configuration|agent_loop|result_presentation|code-explorer_subagent_usage|automations|personal_files_safety)[^>]*>.*?</(user_info|project_context|additional_data|memory_and_skills_reminder|connector-status|user_custom_instructions|identity_context|product_identity|tone_and_style|instructions_for_visualizer|visualizer_examples|task_management|asking_questions|tool_usage_policy|agent_skills|expert_management|mcp_configuration|agent_loop|result_presentation|code-explorer_subagent_usage|automations|personal_files_safety)>`)
+	cleaned = blockRe.ReplaceAllString(cleaned, "")
+
+	// 4. 剥离剩余 XML 标签
+	tagRe := regexp.MustCompile(`<[^>]+>`)
+	cleaned = tagRe.ReplaceAllString(cleaned, " ")
+
+	// 5. 合并多余空白
+	spaceRe := regexp.MustCompile(`\s+`)
+	cleaned = spaceRe.ReplaceAllString(cleaned, " ")
+
+	return strings.TrimSpace(cleaned)
+}
+
+// extractRawText 从 content 字段提取原始文本（不剥离任何标签）
+func extractRawText(content interface{}) string {
 	switch v := content.(type) {
 	case string:
 		return strings.TrimSpace(v)

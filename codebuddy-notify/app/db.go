@@ -180,62 +180,113 @@ func getDisplayTitle(s SessionInfo, jsonlPath string) string {
 	return t
 }
 
-// getDisplayContent 生成通知内容
+// getDisplayContent 生成通知内容（现代化卡片设计）
 func getDisplayContent(s SessionInfo) string {
-	// 尝试从 JSONL 获取最后一条 assistant 消息
 	jsonlPath := findSessionJSONL(s.ID)
-
 	title := getDisplayTitle(s, jsonlPath)
 	summary := extractLastAssistantText(jsonlPath, 300)
 
-	var summaryHTML string
-	if summary != "" {
-		summary = strings.ReplaceAll(summary, "&", "&amp;")
-		summary = strings.ReplaceAll(summary, "<", "&lt;")
-		summary = strings.ReplaceAll(summary, ">", "&gt;")
-		summaryHTML = fmt.Sprintf(
-			"<div style=\"margin-top:8px;padding:8px 10px;background:#f5f5f5;border-left:3px solid #07c160;"+
-				"border-radius:4px;font-size:13px;color:#333;line-height:1.5;white-space:pre-wrap;\">%s</div>",
-			summary,
+	// HTML 转义
+	escTitle := htmlEscape(title)
+	escCWD := htmlEscape(s.CWD)
+	escModel := htmlEscape(s.Model)
+	escSummary := htmlEscape(summary)
+
+	var statusColor, statusGradient, statusLabel string
+	switch s.Status {
+	case "completed":
+		statusColor = "#059669"
+		statusGradient = "linear-gradient(135deg, #059669, #10b981)"
+		statusLabel = "任务完成"
+	case "failed", "error":
+		statusColor = "#dc2626"
+		statusGradient = "linear-gradient(135deg, #dc2626, #ef4444)"
+		statusLabel = "任务失败"
+	default:
+		statusColor = "#6366f1"
+		statusGradient = "linear-gradient(135deg, #4f46e5, #6366f1)"
+		statusLabel = "状态更新"
+	}
+
+	cardCSS := `max-width:480px;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06),0 1px 4px rgba(0,0,0,0.04);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif;color:#1e293b;line-height:1.6;padding:0;margin:0;`
+
+	// 摘要区块
+	var summaryBlock string
+	if escSummary != "" {
+		summaryBlock = fmt.Sprintf(
+			`<div style="margin-top:12px;padding:14px 16px;background:#f1f5f9;border-left:4px solid %s;border-radius:0 8px 8px 0;font-size:13px;color:#475569;line-height:1.6;white-space:pre-wrap;word-break:break-word;">%s</div>`,
+			statusColor, escSummary,
 		)
 	}
 
-	switch s.Status {
-	case "completed":
+	// 信息行模板
+	row := func(label, value string) string {
 		return fmt.Sprintf(
-			"<h2 style=\"color:#07c160;\">✅ 任务完成</h2>"+
-				"<p><b>任务：</b>%s</p>"+
-				"<p><b>完成时间：</b>%s</p>"+
-				"<p><b>耗时：</b>%s</p>"+
-				"<p><b>工作目录：</b>%s</p>"+
-				"%s"+
-				"<p style=\"color:#888;font-size:12px;\">模型: %s | 会话: %s</p>",
-			title,
-			s.UpdatedAt.Format("2006-01-02 15:04:05"),
-			formatDuration(s.UpdatedAt.Sub(s.CreatedAt)),
-			s.CWD,
-			summaryHTML,
-			s.Model,
-			s.ID[:8],
+			`<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;">`+
+				`<span style="color:#94a3b8;font-size:14px;flex-shrink:0;min-width:48px;">%s</span>`+
+				`<span style="font-size:14px;word-break:break-all;">%s</span>`+
+				`</div>`,
+			label, value,
 		)
-	case "failed", "error":
-		return fmt.Sprintf(
-			"<h2 style=\"color:#fa5151;\">❌ 任务失败</h2>"+
-				"<p><b>任务：</b>%s</p>"+
-				"<p><b>失败时间：</b>%s</p>"+
-				"<p><b>工作目录：</b>%s</p>"+
-				"%s"+
-				"<p style=\"color:#888;font-size:12px;\">模型: %s | 会话: %s</p>",
-			title,
-			s.UpdatedAt.Format("2006-01-02 15:04:05"),
-			s.CWD,
-			summaryHTML,
-			s.Model,
-			s.ID[:8],
-		)
-	default:
-		return fmt.Sprintf("<p>任务 <b>%s</b> 状态: %s</p>", title, s.Status)
 	}
+
+	timeStr := s.UpdatedAt.Format("2006-01-02 15:04:05")
+	durationStr := formatDuration(s.UpdatedAt.Sub(s.CreatedAt))
+	sessionShort := s.ID
+	if len(sessionShort) > 8 {
+		sessionShort = sessionShort[:8]
+	}
+
+	return fmt.Sprintf(
+		`<div style="`+cardCSS+`">`+
+			// Header
+			`<div style="background:`+statusGradient+`;padding:20px 22px;">`+
+			`<div style="display:flex;align-items:center;gap:12px;">`+
+			`<div style="width:36px;height:36px;border-radius:50%%;background:rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;flex-shrink:0;">`+
+			`<span style="color:#fff;font-size:20px;">`+statusIconChar(s.Status)+`</span>`+
+			`</div>`+
+			`<div style="flex:1;min-width:0;">`+
+			`<div style="color:#fff;font-size:17px;font-weight:700;letter-spacing:-0.01em;">%s</div>`+
+			`<div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:2px;">%s</div>`+
+			`</div>`+
+			`</div>`+
+			`</div>`+
+			// Body
+			`<div style="background:#fff;padding:16px 22px;">`+
+			`<div style="font-size:16px;font-weight:600;color:#0f172a;padding:8px 0 12px;border-bottom:1px solid #f1f5f9;word-break:break-all;line-height:1.5;">%s</div>`+
+			row("耗时", durationStr)+
+			`<div style="height:1px;background:#f1f5f9;margin:0 -6px;"></div>`+
+			row("目录", `<span style="font-family:'JetBrains Mono','SF Mono','Menlo',monospace;font-size:12px;color:#64748b;">`+escCWD+`</span>`)+
+			`%s`+
+			`</div>`+
+			// Footer
+			`<div style="background:#f8fafc;padding:10px 22px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #f1f5f9;">`+
+			`<span style="color:#94a3b8;font-size:11px;">`+escModel+`</span>`+
+			`<span style="color:#cbd5e1;font-size:11px;font-family:'JetBrains Mono','SF Mono','Menlo',monospace;">`+sessionShort+`</span>`+
+			`</div>`+
+			`</div>`,
+		statusLabel, timeStr, escTitle, summaryBlock,
+	)
+}
+
+// statusIconChar 返回状态图标字符
+func statusIconChar(status string) string {
+	switch status {
+	case "completed":
+		return "✓"
+	case "failed", "error":
+		return "✕"
+	default:
+		return "i"
+	}
+}
+
+// htmlEscape 简单的 HTML 转义
+func htmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
 
 func formatDuration(d time.Duration) string {

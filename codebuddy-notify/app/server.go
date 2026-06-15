@@ -528,6 +528,15 @@ func parseConvFile(filePath, sessionID, projectName string) *ConvInfo {
 func extractText(content interface{}) string {
 	switch v := content.(type) {
 	case string:
+		// 优先提取 <user_query> 标签中的实际用户输入
+		qmRe := regexp.MustCompile(`(?s)<user_query>\s*(.*?)\s*</user_query>`)
+		if m := qmRe.FindStringSubmatch(v); m != nil && strings.TrimSpace(m[1]) != "" {
+			cleaned := strings.TrimSpace(m[1])
+			if len(cleaned) > 100 {
+				cleaned = cleaned[:100] + "..."
+			}
+			return cleaned
+		}
 		// 去掉 system-reminder 块
 		sysRe := regexp.MustCompile(`(?s)<system-reminder[^>]*>.*?</system-reminder>`)
 		cleaned := sysRe.ReplaceAllString(v, "")
@@ -543,6 +552,7 @@ func extractText(content interface{}) string {
 		}
 		return cleaned
 	case []interface{}:
+		// 数组形式：先拼接所有 text 字段，再用跟 string 一样的清洗逻辑
 		var texts []string
 		for _, block := range v {
 			if b, ok := block.(map[string]interface{}); ok {
@@ -552,10 +562,27 @@ func extractText(content interface{}) string {
 			}
 		}
 		result := strings.Join(texts, "\n")
-		if len(result) > 100 {
-			result = result[:100]
+		// 优先提取 <user_query>
+		qmRe := regexp.MustCompile(`(?s)<user_query>\s*(.*?)\s*</user_query>`)
+		if m := qmRe.FindStringSubmatch(result); m != nil && strings.TrimSpace(m[1]) != "" {
+			cleaned := strings.TrimSpace(m[1])
+			if len(cleaned) > 100 {
+				cleaned = cleaned[:100] + "..."
+			}
+			return cleaned
 		}
-		return strings.TrimSpace(result)
+		// 剥离 system-reminder
+		sysRe := regexp.MustCompile(`(?s)<system-reminder[^>]*>.*?</system-reminder>`)
+		cleaned := sysRe.ReplaceAllString(result, "")
+		tagRe := regexp.MustCompile(`<[^>]+>`)
+		cleaned = tagRe.ReplaceAllString(cleaned, " ")
+		spaceRe := regexp.MustCompile(`\s+`)
+		cleaned = spaceRe.ReplaceAllString(cleaned, " ")
+		cleaned = strings.TrimSpace(cleaned)
+		if len(cleaned) > 100 {
+			cleaned = cleaned[:100] + "..."
+		}
+		return cleaned
 	}
 	return ""
 }
