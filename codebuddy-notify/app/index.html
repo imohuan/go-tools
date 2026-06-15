@@ -476,7 +476,8 @@
 
           <!-- 子代理底部标签 -->
           <div v-if="agentTags.length > 1"
-            class="h-10 md:h-12 flex-shrink-0 border-t-2 border-dashed border-emerald-200 bg-surface-container-low flex items-center px-2 md:px-4 gap-1.5 md:gap-2 overflow-x-auto max-w-full">
+            class="h-10 md:h-12 flex-shrink-0 border-t-2 border-dashed border-emerald-200 bg-surface-container-low flex items-center px-2 md:px-4 gap-1.5 md:gap-2 overflow-x-auto max-w-full"
+            @wheel.prevent="($event) => { $event.currentTarget.scrollLeft += $event.deltaY }">
             <span class="text-label-md text-on-surface-variant whitespace-nowrap flex-shrink-0">子代理:</span>
             <button v-for="tag in agentTags" :key="tag.sessionId" @click="switchToAgent(tag.sessionId)"
               class="px-2 md:px-3 py-1 md:py-1.5 rounded-full text-body-sm font-medium whitespace-nowrap transition-colors border flex-shrink-0"
