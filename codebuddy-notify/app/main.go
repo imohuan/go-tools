@@ -78,13 +78,16 @@ func main() {
 
 	log.SetFlags(log.Ltime)
 
+	// 预先加载 config 获取 dbPath（所有模式共用）
+	cfg := loadConfig()
+	dbPath := cfg.DBPath
+
 	switch *mode {
 	case "all":
-		runAll(*port)
+		runAll(*port, dbPath)
 	case "server":
-		StartServer(*port, "")
+		StartServer(*port, "", dbPath)
 	case "monitor":
-		cfg := loadConfig()
 		startMonitor(cfg)
 	default:
 		fmt.Fprintf(os.Stderr, "用法: %s -mode=all|monitor|server [-port=8080]\n", os.Args[0])
@@ -93,7 +96,7 @@ func main() {
 }
 
 // runAll 同时启动 Web 服务和任务监听
-func runAll(port int) {
+func runAll(port int, dbPath string) {
 	cfg := loadConfig()
 
 	log.Println("=== CodeBuddy Notify (All-in-One) ===")
@@ -119,7 +122,7 @@ func runAll(port int) {
 	}()
 
 	// 启动 Web 服务（主线程，阻塞）
-	StartServer(port, "")
+	StartServer(port, "", dbPath)
 }
 
 func startMonitor(cfg *Config) {

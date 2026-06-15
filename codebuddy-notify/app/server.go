@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +42,7 @@ type ConvInfo struct {
 	SubAgentCount int    `json:"sub_agent_count"`
 	Timestamp     int64  `json:"timestamp"`
 	ProjectName   string `json:"project_name,omitempty"`
+	Status        string `json:"status,omitempty"` // completed / working / pending / failed
 }
 
 // APIResponse 通用 API 响应
@@ -53,10 +56,78 @@ type APIResponse struct {
 
 type Server struct {
 	projectsDir string
+	dbPath      string
 }
 
-func NewServer(projectsDir string) *Server {
-	return &Server{projectsDir: projectsDir}
+func NewServer(projectsDir, dbPath string) *Server {
+	return &Server{projectsDir: projectsDir, dbPath: dbPath}
+}
+
+// projectList 仅返回项目目录列表（不含对话详情），用于快速初始化
+func (s *Server) projectList(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir(s.projectsDir)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, APIResponse{Error: err.Error()})
+		return
+	}
+
+	type ProjectBrief struct {
+		Name      string `json:"name"`
+		ConvCount int    `json:"conv_count"`
+		Newest    int64  `json:"newest"` // 最新对话时间戳，用于排序
+	}
+
+	var projects []ProjectBrief
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		projectPath := filepath.Join(s.projectsDir, entry.Name())
+
+		jsonlFiles, _ := filepath.Glob(filepath.Join(projectPath, "*.jsonl"))
+		convCount := len(jsonlFiles)
+
+		// 探最新对话时间戳（只读第一行的 timestamp 字段）
+		var newest int64
+		for _, f := range jsonlFiles {
+			ts := readFirstLineTimestamp(f)
+			if ts > newest {
+				newest = ts
+			}
+		}
+
+		projects = append(projects, ProjectBrief{
+			Name:      entry.Name(),
+			ConvCount: convCount,
+			Newest:    newest,
+		})
+	}
+
+	sort.Slice(projects, func(i, j int) bool {
+		return projects[i].Newest > projects[j].Newest
+	})
+
+	writeJSON(w, http.StatusOK, APIResponse{Success: true, Data: projects})
+}
+
+// readFirstLineTimestamp 读取 JSONL 第一行的 timestamp 字段
+func readFirstLineTimestamp(filePath string) int64 {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	if scanner.Scan() {
+		var firstMsg map[string]interface{}
+		if json.Unmarshal(scanner.Bytes(), &firstMsg) == nil {
+			if ts, ok := firstMsg["timestamp"].(float64); ok {
+				return int64(ts)
+			}
+		}
+	}
+	return 0
 }
 
 // listProjects 列出所有项目
@@ -92,7 +163,7 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, APIResponse{Success: true, Data: projects})
 }
 
-// listConversations 列出项目下的对话
+// listConversations 列出项目下的对话，支持 ?since=<timestamp_ms> 增量刷新
 func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
 	projectName := r.PathValue("project")
 
@@ -102,6 +173,16 @@ func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 加载 DB 中的 session 信息（title + status）
+	dbTitles := s.loadSessionTitles()
+
+	// 增量刷新：只返回 since 之后更新的对话
+	sinceStr := r.URL.Query().Get("since")
+	var sinceTS int64
+	if sinceStr != "" {
+		sinceTS, _ = strconv.ParseInt(sinceStr, 10, 64)
+	}
+
 	files, err := filepath.Glob(filepath.Join(projectPath, "*.jsonl"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, APIResponse{Error: err.Error()})
@@ -109,22 +190,80 @@ func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var convs []ConvInfo
+	var maxTS int64
 	for _, f := range files {
 		sessionID := strings.TrimSuffix(filepath.Base(f), ".jsonl")
 		info := parseConvFile(f, sessionID, projectName)
-		if info != nil {
-			convs = append(convs, *info)
+		if info == nil {
+			continue
 		}
+
+		// 用 DB 数据覆盖标题和状态
+		if dbInfo, ok := dbTitles[sessionID]; ok {
+			if dbInfo.title != "" {
+				info.Title = dbInfo.title
+			}
+			if dbInfo.status != "" {
+				info.Status = dbInfo.status
+			}
+		}
+
+		// 增量模式：跳过旧对话。放宽 2 秒避免边界丢失
+		if sinceTS > 0 && info.Timestamp <= sinceTS-2000 {
+			continue
+		}
+		if info.Timestamp > maxTS {
+			maxTS = info.Timestamp
+		}
+		convs = append(convs, *info)
 	}
 
 	sort.Slice(convs, func(i, j int) bool {
 		return convs[i].Timestamp > convs[j].Timestamp
 	})
 
-	writeJSON(w, http.StatusOK, APIResponse{Success: true, Data: convs})
+	writeJSON(w, http.StatusOK, APIResponse{Success: true, Data: map[string]interface{}{
+		"conversations": convs,
+		"total":         len(convs),
+		"newest_ts":     maxTS,
+	}})
 }
 
-// getConversation 获取对话详情
+type dbSessionInfo struct {
+	title  string
+	status string
+}
+
+// loadSessionTitles 从 workbuddy.db 加载所有 session 的标题和状态
+func (s *Server) loadSessionTitles() map[string]dbSessionInfo {
+	result := make(map[string]dbSessionInfo)
+	if s.dbPath == "" {
+		return result
+	}
+
+	db, err := sql.Open("sqlite", s.dbPath+"?mode=ro")
+	if err != nil {
+		return result
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT id, title, status FROM sessions WHERE title IS NOT NULL AND title != ''")
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, title, status string
+		if err := rows.Scan(&id, &title, &status); err != nil {
+			continue
+		}
+		result[id] = dbSessionInfo{title: title, status: status}
+	}
+	return result
+}
+
+// getConversation 获取对话详情，支持 ?since=<timestamp_ms> 仅返回新消息
 func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 	projectName := r.PathValue("project")
 	sessionID := r.PathValue("session")
@@ -137,11 +276,47 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+
+	sinceStr := r.URL.Query().Get("since")
+	var sinceTS int64
+	var newestTS int64
+	if sinceStr != "" {
+		sinceTS, _ = strconv.ParseInt(sinceStr, 10, 64)
+	}
+
 	var messages []json.RawMessage
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
+
+		// 始终追踪最新时间戳（增量模式下顺便做过滤）
+		if sinceTS > 0 {
+			var peek map[string]interface{}
+			if json.Unmarshal([]byte(line), &peek) == nil {
+				if ts, ok := peek["timestamp"].(float64); ok {
+					ti := int64(ts)
+					if ti > newestTS {
+						newestTS = ti
+					}
+					if ti <= sinceTS {
+						continue
+					}
+				}
+			}
+		} else {
+			// 全量模式下也追踪最新时间戳
+			var peek map[string]interface{}
+			if json.Unmarshal([]byte(line), &peek) == nil {
+				if ts, ok := peek["timestamp"].(float64); ok {
+					ti := int64(ts)
+					if ti > newestTS {
+						newestTS = ti
+					}
+				}
+			}
+		}
+
 		messages = append(messages, json.RawMessage(line))
 	}
 
@@ -149,6 +324,7 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 		"session_id": sessionID,
 		"messages":   messages,
 		"total":      len(messages),
+		"newest_ts":  newestTS,
 	}})
 }
 
@@ -260,8 +436,8 @@ func (s *Server) serveHTML(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// API 路由
-	mux.HandleFunc("GET /api/all-conversations", s.allConversations)       // 一次性返回所有
-	mux.HandleFunc("GET /api/projects", s.listProjects)
+	mux.HandleFunc("GET /api/project-list", s.projectList)                     // 仅项目目录（快速）
+	mux.HandleFunc("GET /api/all-conversations", s.allConversations)           // 一次性返回所有（兼容旧版）
 	mux.HandleFunc("GET /api/projects/{project}/conversations", s.listConversations)
 	mux.HandleFunc("GET /api/projects/{project}/conversations/{session}", s.getConversation)
 	mux.HandleFunc("GET /api/projects/{project}/conversations/{session}/subagents/{agent}", s.getSubAgent)
@@ -393,7 +569,7 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 // ========== 入口 ==========
 
-func StartServer(port int, projectsDir string) {
+func StartServer(port int, projectsDir, dbPath string) {
 	if projectsDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -407,7 +583,7 @@ func StartServer(port int, projectsDir string) {
 		log.Printf("警告: 项目目录不存在: %s", projectsDir)
 	}
 
-	server := NewServer(projectsDir)
+	server := NewServer(projectsDir, dbPath)
 	mux := http.NewServeMux()
 	server.RegisterRoutes(mux)
 

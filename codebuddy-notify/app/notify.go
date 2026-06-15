@@ -46,9 +46,10 @@ func NewWxPusherNotifier(token string, retryMax int) *WxPusherNotifier {
 
 // NotifyCompleted 发送任务完成通知
 func (n *WxPusherNotifier) NotifyCompleted(s SessionChange) {
+	jsonlPath := findSessionJSONL(s.SessionInfo.ID)
 	req := WxPusherRequest{
 		Content:     getDisplayContent(s.SessionInfo),
-		Summary:     "✅ " + getDisplayTitle(s.SessionInfo),
+		Summary:     "✅ " + getDisplayTitle(s.SessionInfo, jsonlPath),
 		ContentType: 2, // HTML
 		SPT:         n.token,
 	}
@@ -57,9 +58,10 @@ func (n *WxPusherNotifier) NotifyCompleted(s SessionChange) {
 
 // NotifyFailed 发送任务失败通知
 func (n *WxPusherNotifier) NotifyFailed(s SessionChange) {
+	jsonlPath := findSessionJSONL(s.SessionInfo.ID)
 	req := WxPusherRequest{
 		Content:     getDisplayContent(s.SessionInfo),
-		Summary:     "❌ " + getDisplayTitle(s.SessionInfo),
+		Summary:     "❌ " + getDisplayTitle(s.SessionInfo, jsonlPath),
 		ContentType: 2, // HTML
 		SPT:         n.token,
 	}

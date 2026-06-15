@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -120,11 +121,11 @@ func (m *SessionMonitor) Refresh() []SessionChange {
 			// 只要变成 completed / failed / error 就通知
 			if (s.Status == "completed" || s.Status == "failed" || s.Status == "error") {
 				log.Printf("状态变更: %s → %s [%s]",
-					prevStatus, s.Status, getDisplayTitle(s))
+					prevStatus, s.Status, getDisplayTitle(s, ""))
 				changes = append(changes, change)
 			} else {
 				log.Printf("状态变更(不通知): %s → %s [%s]",
-					prevStatus, s.Status, getDisplayTitle(s))
+					prevStatus, s.Status, getDisplayTitle(s, ""))
 			}
 		} else {
 			// 新增的 session（或者是轮询中间产生的 session）
@@ -142,7 +143,7 @@ func (m *SessionMonitor) Refresh() []SessionChange {
 					PreviousStatus: "working", // 推测
 				}
 				log.Printf("新增已完成: %s [%s] (耗时 %s)",
-					s.Status, getDisplayTitle(s),
+					s.Status, getDisplayTitle(s, ""),
 					formatDuration(s.UpdatedAt.Sub(s.CreatedAt)))
 				changes = append(changes, change)
 			}
@@ -159,7 +160,16 @@ func (m *SessionMonitor) Refresh() []SessionChange {
 	return changes
 }
 
-func getDisplayTitle(s SessionInfo) string {
+func getDisplayTitle(s SessionInfo, jsonlPath string) string {
+	// 优先使用 JSONL 中最后一条 user 消息作为标题
+	if userText := extractLastUserText(jsonlPath, 80); userText != "" {
+		// 取第一行（去掉多行内容）
+		idx := strings.IndexByte(userText, '\n')
+		if idx > 0 {
+			userText = userText[:idx]
+		}
+		return userText
+	}
 	if s.CustomTitle != "" {
 		return s.CustomTitle
 	}
@@ -172,7 +182,23 @@ func getDisplayTitle(s SessionInfo) string {
 
 // getDisplayContent 生成通知内容
 func getDisplayContent(s SessionInfo) string {
-	title := getDisplayTitle(s)
+	// 尝试从 JSONL 获取最后一条 assistant 消息
+	jsonlPath := findSessionJSONL(s.ID)
+
+	title := getDisplayTitle(s, jsonlPath)
+	summary := extractLastAssistantText(jsonlPath, 300)
+
+	var summaryHTML string
+	if summary != "" {
+		summary = strings.ReplaceAll(summary, "&", "&amp;")
+		summary = strings.ReplaceAll(summary, "<", "&lt;")
+		summary = strings.ReplaceAll(summary, ">", "&gt;")
+		summaryHTML = fmt.Sprintf(
+			"<div style=\"margin-top:8px;padding:8px 10px;background:#f5f5f5;border-left:3px solid #07c160;"+
+				"border-radius:4px;font-size:13px;color:#333;line-height:1.5;white-space:pre-wrap;\">%s</div>",
+			summary,
+		)
+	}
 
 	switch s.Status {
 	case "completed":
@@ -182,11 +208,13 @@ func getDisplayContent(s SessionInfo) string {
 				"<p><b>完成时间：</b>%s</p>"+
 				"<p><b>耗时：</b>%s</p>"+
 				"<p><b>工作目录：</b>%s</p>"+
+				"%s"+
 				"<p style=\"color:#888;font-size:12px;\">模型: %s | 会话: %s</p>",
 			title,
 			s.UpdatedAt.Format("2006-01-02 15:04:05"),
 			formatDuration(s.UpdatedAt.Sub(s.CreatedAt)),
 			s.CWD,
+			summaryHTML,
 			s.Model,
 			s.ID[:8],
 		)
@@ -196,10 +224,12 @@ func getDisplayContent(s SessionInfo) string {
 				"<p><b>任务：</b>%s</p>"+
 				"<p><b>失败时间：</b>%s</p>"+
 				"<p><b>工作目录：</b>%s</p>"+
+				"%s"+
 				"<p style=\"color:#888;font-size:12px;\">模型: %s | 会话: %s</p>",
 			title,
 			s.UpdatedAt.Format("2006-01-02 15:04:05"),
 			s.CWD,
+			summaryHTML,
 			s.Model,
 			s.ID[:8],
 		)
