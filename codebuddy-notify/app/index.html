@@ -4,130 +4,225 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WorkBuddy 对话查看器</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-  :root {
-    --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+<!-- Axiom UI Design Tokens -->
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          primary: '#000000',
+          'on-primary': '#ffffff',
+          secondary: '#5f5e61',
+          'on-secondary': '#ffffff',
+          tertiary: '#000000',
+          error: '#ba1a1a',
+          'on-error': '#ffffff',
+          background: '#f9f9fa',
+          surface: '#f9f9fa',
+          'surface-container-lowest': '#ffffff',
+          'surface-container-low': '#f3f3f4',
+          'surface-container': '#eeeeef',
+          'surface-container-high': '#e8e8e9',
+          'surface-container-highest': '#e2e2e3',
+          'surface-variant': '#e2e2e3',
+          'on-surface': '#1a1c1d',
+          'on-surface-variant': '#47464a',
+          'on-background': '#1a1c1d',
+          outline: '#78767b',
+          'outline-variant': '#c8c5ca',
+          'secondary-container': '#e4e1e5',
+          'on-secondary-container': '#656467',
+          'error-container': '#ffdad6',
+          'on-error-container': '#93000a',
+        },
+        borderRadius: { DEFAULT: '0.125rem', lg: '0.25rem', xl: '0.5rem', full: '0.75rem' },
+        spacing: { xs: '0.25rem', sm: '0.5rem', md: '1rem', lg: '1.5rem', xl: '2rem', gutter: '16px', margin: '24px' },
+        fontFamily: {
+          'display': ['Geist'],
+          'headline-lg': ['Geist'], 'headline-md': ['Geist'], 'headline-sm': ['Geist'],
+          'body-lg': ['Geist'], 'body-sm': ['Geist'], 'body-md': ['Geist'],
+          'label-md': ['JetBrains Mono'],
+        },
+        fontSize: {
+          'display': ['36px', { lineHeight: '40px', letterSpacing: '-0.02em', fontWeight: '600' }],
+          'headline-lg': ['24px', { lineHeight: '32px', letterSpacing: '-0.02em', fontWeight: '600' }],
+          'headline-lg-mobile': ['20px', { lineHeight: '28px', fontWeight: '600' }],
+          'headline-md': ['20px', { lineHeight: '28px', letterSpacing: '-0.01em', fontWeight: '600' }],
+          'headline-sm': ['16px', { lineHeight: '24px', fontWeight: '600' }],
+          'body-lg': ['16px', { lineHeight: '24px', fontWeight: '400' }],
+          'body-sm': ['12px', { lineHeight: '16px', fontWeight: '400' }],
+          'body-md': ['14px', { lineHeight: '20px', fontWeight: '400' }],
+          'label-md': ['12px', { lineHeight: '16px', letterSpacing: '0.02em', fontWeight: '500' }],
+        },
+      },
+    },
   }
-  body { font-family: var(--font-sans); }
+</script>
+
+<!-- Fonts & Icons -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/geist@5.2.9/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/geist@5.2.9/600.css" rel="stylesheet">
+
+<style>
+  body { font-family: 'Geist', sans-serif; }
+
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    font-size: 18px;
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  .pro-shadow {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  }
 
   .msg-content { line-height: 1.7; }
   .msg-content p { margin-bottom: 0.5em; }
   .msg-content pre {
     background: #1e1e2e; color: #cdd6f4; padding: 12px 16px; border-radius: 8px;
-    overflow-x: auto; font-size: 12px; font-family: var(--font-mono); margin: 8px 0;
+    overflow-x: auto; font-size: 12px; line-height: 1.5; margin: 8px 0;
   }
   .msg-content code {
     background: rgba(0,0,0,0.06); padding: 2px 5px; border-radius: 4px;
-    font-size: 0.9em; font-family: var(--font-mono);
+    font-size: 0.9em; font-family: 'JetBrains Mono', 'Fira Code', monospace;
   }
   .msg-content pre code { background: none; padding: 0; }
 
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #d0d5dd; border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #b0b5bd; }
+  ::-webkit-scrollbar-thumb { background: #d0d5dd; border-radius: 2px; }
 
-  .fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
-  .fade-enter-from, .fade-leave-to { opacity: 0; }
+  /* 移动端覆盖层 */
+  .sidebar-overlay {
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(2px);
+  }
 </style>
 </head>
-<body class="h-full bg-white text-gray-900 antialiased">
-<div id="app" class="h-full flex flex-col">
-  <header class="h-12 flex items-center px-4 gap-3 border-b border-gray-200 bg-white flex-shrink-0 z-10">
-    <button
-      @click="sidebarCollapsed = !sidebarCollapsed"
-      class="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors flex-shrink-0"
-      :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
-    >
-      <svg class="w-4 h-4 text-gray-500 transition-transform" :class="sidebarCollapsed ? '' : 'rotate-180'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M15 18l-6-6 6-6"/>
-      </svg>
-    </button>
-    <div class="flex gap-1.5">
-      <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]"></span>
-      <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]"></span>
-      <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]"></span>
-    </div>
-    <span class="font-semibold text-sm tracking-tight">WB 对话查看器 (API)</span>
-    <span class="text-xs text-gray-400 truncate max-w-[200px]">{{ projects.length }} 项目</span>
+<body class="h-full bg-surface text-on-surface antialiased overflow-hidden">
 
-    <div v-if="activeConv" class="ml-auto flex items-center gap-2.5">
-      <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
-        <input type="checkbox" v-model="autoRefresh" class="w-3.5 h-3.5 rounded border-gray-300 text-green-600 focus:ring-green-500" />
-        定时刷新
+<div id="app" class="h-full flex flex-col">
+
+  <!-- ====== 顶部栏 ====== -->
+  <header class="h-12 flex items-center px-3 md:px-4 gap-2 md:gap-3 border-b border-outline-variant bg-surface-container-lowest flex-shrink-0">
+    <!-- 汉堡菜单（移动端） -->
+    <button @click="sidebarOpen = !sidebarOpen"
+      class="md:hidden w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-high -ml-1">
+      <span class="material-symbols-outlined text-on-surface-variant text-[20px]">{{ sidebarOpen ? 'close' : 'menu' }}</span>
+    </button>
+
+    <!-- 桌面端侧栏折叠按钮 -->
+    <button @click="sidebarCollapsed = !sidebarCollapsed"
+      class="hidden md:flex w-7 h-7 items-center justify-center rounded-md hover:bg-surface-container-high transition-colors flex-shrink-0">
+      <span class="material-symbols-outlined text-on-surface-variant transition-transform text-[18px]"
+        :class="sidebarCollapsed ? '' : 'rotate-180'">chevron_left</span>
+    </button>
+
+    <span class="font-headline-sm md:font-headline-sm text-on-surface tracking-tight truncate">WB 对话查看器</span>
+    <span class="hidden sm:inline text-body-sm text-on-surface-variant truncate">{{ projects.length }} 项目</span>
+
+    <!-- 移动端快捷刷新 -->
+    <button @click="loadProjects" :disabled="loading" class="md:hidden ml-auto p-1.5 rounded-full hover:bg-surface-container-high">
+      <span class="material-symbols-outlined text-on-surface-variant text-[18px]" :class="loading ? 'animate-spin' : ''">refresh</span>
+    </button>
+
+    <!-- 右侧控件（桌面） -->
+    <div v-if="activeConv" class="hidden md:flex ml-auto items-center gap-2.5">
+      <label class="flex items-center gap-1.5 text-body-sm text-on-surface-variant cursor-pointer select-none">
+        <span class="material-symbols-outlined text-[14px]">schedule</span>
+        <input type="checkbox" v-model="autoRefresh" class="w-3.5 h-3.5 rounded-sm border-outline-variant text-primary" />
       </label>
-      <input v-if="autoRefresh" v-model.number="refreshInterval" type="number" min="1" max="60"
-        class="w-12 px-1 py-0.5 text-xs text-center border border-gray-200 rounded" title="刷新间隔（秒）" />
-      <span v-if="autoRefresh" class="text-[10px] text-gray-400">秒</span>
-      <span class="text-gray-200">|</span>
-      <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
-        <input type="checkbox" v-model="autoScroll" class="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-        自动滚动
+      <input v-if="autoRefresh" v-model.number="refreshInterval" type="number" min="3" max="60"
+        class="w-10 px-1 py-0.5 text-center text-body-sm bg-surface-container-low border border-outline-variant rounded text-on-surface" />
+      <span v-if="autoRefresh" class="text-[10px] text-on-surface-variant">s</span>
+
+      <span class="text-outline-variant">|</span>
+
+      <label class="flex items-center gap-1.5 text-body-sm text-on-surface-variant cursor-pointer select-none">
+        <span class="material-symbols-outlined text-[14px]">vertical_align_bottom</span>
+        <input type="checkbox" v-model="autoScroll" class="w-3.5 h-3.5 rounded-sm border-outline-variant text-primary" />
       </label>
-      <input v-model.number="scrollThreshold" type="number" min="20" max="500" step="10"
-        class="w-12 px-1 py-0.5 text-xs text-center border border-gray-200 rounded" title="吸附阈值" />
-      <span class="text-[10px] text-gray-400">px</span>
-      <span v-if="autoRefresh" class="text-[10px] text-green-500 animate-pulse">●</span>
     </div>
   </header>
 
-  <div class="flex flex-1 overflow-hidden">
+  <!-- ====== 主区域 ====== -->
+  <div class="flex flex-1 overflow-hidden relative">
+
+    <!-- 移动端覆盖层 -->
+    <div v-if="sidebarOpen" @click="sidebarOpen = false"
+      class="md:hidden fixed inset-0 z-20 sidebar-overlay transition-opacity"></div>
+
+    <!-- ====== 左侧栏 ====== -->
     <aside
-      class="flex-shrink-0 flex flex-col bg-gray-50 border-r border-gray-200 transition-all duration-200 overflow-hidden"
-      :class="sidebarCollapsed ? 'w-0 border-r-0' : 'w-[320px]'"
+      class="flex-shrink-0 flex flex-col bg-surface-container-low border-r border-outline-variant transition-all duration-200 overflow-hidden z-30"
+      :class="[
+        sidebarCollapsed && !sidebarOpen ? 'w-0 border-r-0' : 'w-[320px] max-w-[85vw]',
+        'md:relative fixed md:inset-auto inset-y-0 left-0',
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      ]"
     >
-      <div class="p-4 border-b border-gray-200 space-y-3">
+      <div class="p-3 md:p-4 border-b border-outline-variant space-y-3">
         <div class="flex items-center gap-2">
-          <button @click="loadProjects" :disabled="loading" class="text-xs px-2 py-1 rounded text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50">
-            {{ loading ? '加载中...' : '⟳ 刷新' }}
+          <button @click="loadProjects" :disabled="loading"
+            class="flex items-center gap-1.5 text-body-sm text-on-surface-variant hover:text-on-surface px-2 py-1 rounded-md hover:bg-surface-container-high transition-colors">
+            <span class="material-symbols-outlined text-[16px]" :class="loading ? 'animate-spin' : ''">refresh</span>
+            <span class="hidden sm:inline">{{ loading ? '加载中' : '刷新' }}</span>
           </button>
-          <span class="text-xs text-gray-400">{{ projects.length }} 项目 / {{ totalConvs }} 对话</span>
+          <span class="text-body-sm text-on-surface-variant ml-auto">{{ totalConvs }} 对话</span>
         </div>
-        <input v-model="searchQuery" type="text" placeholder="搜索对话..."
-          class="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 bg-white" />
+        <div class="relative">
+          <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-outline text-[16px]">search</span>
+          <input v-model="searchQuery" type="text" placeholder="搜索对话..."
+            class="w-full pl-8 pr-3 py-2 rounded-md border border-outline-variant bg-surface-container-lowest text-body-md text-on-surface placeholder:text-outline focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" />
+        </div>
+        <!-- 移动端状态 -->
+        <div class="flex md:hidden items-center gap-2 text-body-sm text-on-surface-variant" v-if="!activeConv">
+          <span class="material-symbols-outlined text-[16px]">info</span>
+          <span>展开项目 → 点击对话查看</span>
+        </div>
       </div>
 
+      <!-- 对话列表 -->
       <div class="flex-1 overflow-y-auto px-2 py-1">
-        <div v-if="loading" class="flex items-center justify-center h-32">
-          <p class="text-sm text-gray-400">加载中...</p>
+        <div v-if="loading" class="flex flex-col items-center justify-center h-32 gap-2">
+          <span class="material-symbols-outlined animate-spin text-on-surface-variant text-[24px]">progress_activity</span>
+          <p class="text-body-sm text-on-surface-variant">加载中...</p>
         </div>
-        <div v-else-if="filteredProjects.length === 0" class="flex items-center justify-center h-32">
-          <p class="text-sm text-gray-400">{{ searchQuery ? '无匹配结果' : '暂无数据' }}</p>
+        <div v-else-if="filteredProjects.length === 0" class="flex flex-col items-center justify-center h-32 gap-2">
+          <span class="material-symbols-outlined text-outline text-[32px]">folder_off</span>
+          <p class="text-body-sm text-on-surface-variant">{{ searchQuery ? '无匹配结果' : '暂无数据' }}</p>
         </div>
 
         <template v-for="proj in filteredProjects" :key="proj.key">
-          <div class="group">
-            <div
-              @click="toggleProject(proj.projectName)"
-              class="px-3 py-1.5 mt-2 mb-0.5 flex items-center gap-1.5 text-[10px] text-gray-400 font-semibold uppercase tracking-wider cursor-pointer hover:text-gray-600 select-none"
-            >
-              <svg class="w-2.5 h-2.5 transition-transform" :class="isProjectCollapsed(proj.projectName) ? '' : 'rotate-90'" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>
-              📂 {{ proj.projectName }}
-              <span class="text-gray-300 font-normal ml-1">({{ proj.convs.length }})</span>
-            </div>
+          <div @click="toggleProject(proj.projectName)"
+            class="px-3 py-1.5 mt-2 mb-0.5 flex items-center gap-1.5 text-label-md text-on-surface-variant cursor-pointer hover:text-on-surface select-none rounded hover:bg-surface-container-high">
+            <span class="material-symbols-outlined text-[12px] transition-transform" :class="isProjectCollapsed(proj.projectName) ? '' : 'rotate-90'">chevron_right</span>
+            <span class="truncate">{{ proj.projectName }}</span>
+            <span class="text-outline font-normal ml-auto">({{ proj.convs.length }})</span>
           </div>
 
           <div v-if="!isProjectCollapsed(proj.projectName)">
-
             <div v-for="conv in (projectConvCache[proj.projectName] || [])" :key="conv.sessionId"
-              @click="selectConversation(conv)"
-              class="px-3 py-2.5 ml-4 mb-1 rounded-lg cursor-pointer transition-colors border"
+              @click="selectConversation(conv); sidebarOpen = false"
+              class="px-3 py-2.5 ml-4 mb-1 rounded-md cursor-pointer transition-colors border"
               :class="[activeConv && activeConv.sessionId === conv.sessionId
-                ? 'bg-indigo-50 border-indigo-300'
-                : 'bg-white border-gray-100 hover:border-gray-300 hover:bg-gray-50']"
+                ? 'bg-primary/5 border-primary/20'
+                : 'bg-surface-container-lowest border-outline-variant/50 hover:border-outline hover:bg-surface']"
             >
-              <div class="text-sm font-medium text-gray-900 truncate" :title="conv.title">
+              <div class="text-body-md text-on-surface truncate leading-snug" :title="conv.title">
                 {{ conv.title }}
               </div>
-              <div class="flex items-center gap-3 mt-1 text-xs text-gray-400">
+              <div class="flex items-center gap-2 mt-1 text-body-sm text-on-surface-variant">
                 <span>{{ conv.date }}</span>
+                <span>·</span>
                 <span>{{ conv.msgCount }} 条</span>
                 <span v-if="conv.subAgentCount > 0"
-                  class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                  class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-secondary-container text-on-secondary-container">
                   {{ conv.subAgentCount }} 子代理
                 </span>
               </div>
@@ -137,107 +232,126 @@
       </div>
     </aside>
 
-    <section class="flex-1 flex flex-col overflow-hidden bg-white">
+    <!-- ====== 右侧对话区 ====== -->
+    <section class="flex-1 flex flex-col overflow-hidden bg-surface-container-lowest min-w-0">
+
+      <!-- 空状态 -->
       <div v-if="!activeConv" class="flex-1 flex items-center justify-center">
-        <div class="text-center">
-          <div class="text-4xl mb-3">💬</div>
-          <p class="text-gray-400 text-sm">选择一个项目展开并加载对话</p>
+        <div class="text-center space-y-3">
+          <span class="material-symbols-outlined text-outline text-[48px]">forum</span>
+          <p class="text-body-lg text-on-surface-variant">展开左侧项目 → 点击对话</p>
+          <p class="text-body-sm text-outline hidden md:block">选择对话后自动加载，支持实时刷新</p>
         </div>
       </div>
 
       <template v-else>
-        <div class="px-5 py-3 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
-          <span class="font-semibold text-sm text-gray-900 truncate max-w-[400px]">
+        <!-- 对话头部 -->
+        <div class="px-3 md:px-5 py-2.5 md:py-3 border-b border-outline-variant flex items-center gap-2 md:gap-3 flex-shrink-0 bg-surface-container-lowest">
+          <!-- 移动端返回按钮 -->
+          <button @click="activeConv = null" class="md:hidden flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-high">
+            <span class="material-symbols-outlined text-on-surface-variant text-[20px]">arrow_back</span>
+          </button>
+
+          <span class="text-headline-sm md:text-headline-sm text-on-surface truncate flex-1 min-w-0">
             {{ activeConv.title }}
           </span>
-          <div v-if="agentChain.length > 0" class="flex items-center gap-1.5 text-xs">
-            <span class="text-gray-300">|</span>
-            <button
-              v-for="(agent, idx) in agentChain"
-              :key="agent.sessionId"
+
+          <!-- 移动端刷新按钮 -->
+          <button @click="refreshCurrentView()" class="md:hidden p-1.5 rounded-full hover:bg-surface-container-high flex-shrink-0">
+            <span class="material-symbols-outlined text-on-surface-variant text-[18px]">refresh</span>
+          </button>
+
+          <!-- 面包屑 -->
+          <div v-if="agentChain.length > 0" class="hidden md:flex items-center gap-1.5 text-body-sm">
+            <span class="text-outline-variant">|</span>
+            <button v-for="(agent, idx) in agentChain" :key="agent.sessionId"
               @click="switchToAgent(idx)"
               class="px-2 py-0.5 rounded transition-colors"
               :class="idx === agentChain.length - 1
-                ? 'bg-indigo-100 text-indigo-700 font-medium'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'"
-            >
+                ? 'bg-primary/8 text-primary font-medium'
+                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'">
               {{ agent.label }}
             </button>
           </div>
         </div>
 
-        <div class="flex-1 overflow-y-auto px-5 py-4 space-y-3" ref="msgContainer" @scroll="onMsgScroll">
+        <!-- 消息列表 -->
+        <div class="flex-1 overflow-y-auto px-3 md:px-5 py-3 md:py-4 space-y-3" ref="msgContainer" @scroll="onMsgScroll">
           <template v-for="node in renderedMessages" :key="node.id">
-            <div
-              v-memo="[node.id, node.collapsed, msgVisible[node.id]]"
+            <div v-memo="[node.id, node.collapsed, msgVisible[node.id]]"
               :ref="el => observeMsg(node.id, el)"
               :style="!msgVisible[node.id] && msgHeights[node.id] ? { height: msgHeights[node.id] + 'px' } : {}"
-              class="msg-wrapper overflow-hidden flex-shrink-0"
-            >
+              class="msg-wrapper overflow-hidden flex-shrink-0">
+
               <template v-if="msgVisible[node.id]">
+                <!-- 用户消息 -->
                 <div v-if="node.type === 'user'" class="flex justify-end">
-                  <div class="max-w-[80%] px-4 py-2.5 rounded-xl bg-indigo-50 border border-indigo-100 text-sm msg-content" v-html="renderMarkdown(node.text)"></div>
+                  <div class="max-w-[90%] md:max-w-[80%] px-3 md:px-4 py-2 md:py-2.5 rounded-xl bg-primary/5 border border-primary/10 text-body-md md:text-body-md text-on-surface msg-content"
+                    v-html="renderMarkdown(node.text)"></div>
                 </div>
+
+                <!-- 助手消息 -->
                 <div v-else-if="node.type === 'assistant'" class="flex justify-start">
-                  <div class="max-w-[80%] px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-sm msg-content" v-html="renderMarkdown(node.text)"></div>
+                  <div class="max-w-[90%] md:max-w-[80%] px-3 md:px-4 py-2 md:py-2.5 rounded-xl bg-surface border border-outline-variant/30 text-body-md md:text-body-md text-on-surface msg-content"
+                    v-html="renderMarkdown(node.text)"></div>
                 </div>
-                <div v-else-if="node.type === 'tool_call'" class="rounded-lg bg-orange-50 border border-orange-200">
-                  <div class="flex items-center gap-2 px-4 py-2.5 cursor-pointer hover:bg-orange-100/50 transition-colors"
+
+                <!-- 工具调用 -->
+                <div v-else-if="node.type === 'tool_call'" class="rounded-md bg-secondary-container/30 border border-outline-variant/40 overflow-hidden">
+                  <div class="flex items-center gap-2 px-3 md:px-4 py-2 md:py-2.5 cursor-pointer hover:bg-secondary-container/50 transition-colors"
                        @click="node.collapsed = !node.collapsed">
-                    <span class="text-orange-600 text-xs font-semibold select-none">🔧 {{ node.fnName }}</span>
-                    <span class="ml-auto text-[10px] text-gray-400 select-none">{{ node.collapsed ? '展开 ▼' : '收起 ▲' }}</span>
+                    <span class="material-symbols-outlined text-on-secondary-container text-[16px]">handyman</span>
+                    <span class="text-body-sm md:text-body-sm text-on-secondary-container font-medium select-none truncate">{{ node.fnName }}</span>
+                    <span class="material-symbols-outlined ml-auto text-on-surface-variant text-[14px] select-none transition-transform"
+                      :class="node.collapsed ? '' : 'rotate-180'">expand_more</span>
                   </div>
-                  <div v-show="!node.collapsed" class="border-t border-orange-100">
-                    <div class="px-4 py-3 bg-orange-100/30">
-                      <div class="text-[10px] text-orange-500 font-medium uppercase tracking-wide mb-1.5">输入参数</div>
-                      <pre class="text-xs font-mono text-gray-600 whitespace-pre-wrap break-all m-0">{{ node.fnArgs || '(无参数)' }}</pre>
+                  <div v-show="!node.collapsed" class="border-t border-outline-variant/40">
+                    <div class="px-3 md:px-4 py-2 md:py-3 bg-secondary-container/15">
+                      <div class="text-label-md text-on-secondary-container uppercase tracking-wide mb-1.5">输入参数</div>
+                      <pre class="text-body-sm font-mono text-on-surface-variant whitespace-pre-wrap break-all m-0">{{ node.fnArgs || '(无参数)' }}</pre>
                     </div>
-                    <div v-if="node.result" class="h-px bg-orange-200"></div>
-                    <div v-if="node.result" class="px-4 py-3 bg-white max-h-[300px] overflow-y-auto">
-                      <div class="text-[10px] text-green-600 font-medium uppercase tracking-wide mb-1.5">输出结果</div>
-                      <pre class="text-xs text-gray-700 whitespace-pre-wrap font-sans leading-relaxed m-0">{{ node.result }}</pre>
+                    <div v-if="node.result" class="h-px bg-outline-variant/40"></div>
+                    <div v-if="node.result" class="px-3 md:px-4 py-2 md:py-3 bg-surface-container-lowest max-h-[200px] md:max-h-[300px] overflow-y-auto">
+                      <div class="text-label-md text-emerald-700 uppercase tracking-wide mb-1.5">输出结果</div>
+                      <pre class="text-body-sm text-on-surface whitespace-pre-wrap font-sans leading-relaxed m-0">{{ node.result }}</pre>
                     </div>
-                    <div v-else class="px-4 py-2 text-xs text-gray-400 italic">等待执行结果...</div>
+                    <div v-else class="px-3 md:px-4 py-2 text-body-sm text-on-surface-variant italic">等待执行结果...</div>
                   </div>
                 </div>
-                <div
-                  v-else-if="node.type === 'subagent'"
+
+                <!-- 子代理跳转 -->
+                <div v-else-if="node.type === 'subagent'"
                   @click="jumpToSubAgent(node)"
-                  class="px-4 py-3 rounded-lg bg-green-50 border-2 border-dashed border-green-300 cursor-pointer hover:bg-green-100 hover:border-green-400 transition-colors flex items-center gap-3 group"
-                >
-                  <span class="text-lg">▶</span>
+                  class="px-3 md:px-4 py-3 rounded-md bg-emerald-50 border-2 border-dashed border-emerald-300 cursor-pointer hover:bg-emerald-100 hover:border-emerald-400 transition-colors flex items-center gap-2 md:gap-3 group">
+                  <span class="material-symbols-outlined text-emerald-600 text-[20px]">play_arrow</span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-sm font-semibold text-green-700">子代理: {{ node.agentId }}</div>
-                    <div class="text-xs text-green-600 truncate">{{ node.taskPreview || '执行任务...' }}</div>
+                    <div class="text-body-sm md:text-body-md text-emerald-700 font-semibold truncate">子代理: {{ node.agentId }}</div>
+                    <div class="text-body-sm text-emerald-600 truncate">{{ node.taskPreview || '执行任务...' }}</div>
                   </div>
-                  <span class="text-xs text-green-500 font-medium group-hover:translate-x-1 transition-transform whitespace-nowrap">跳转 →</span>
+                  <span class="text-body-sm text-emerald-500 font-medium group-hover:translate-x-1 transition-transform whitespace-nowrap">跳转 →</span>
                 </div>
-                <div v-else-if="node.type === 'system'" class="text-center">
-                  <span class="inline-block px-3 py-1 text-xs text-gray-400 bg-gray-50 rounded-full border border-gray-100">
-                    {{ node.text }}
-                  </span>
+
+                <!-- 系统消息 -->
+                <div v-else class="text-center">
+                  <span class="inline-block px-3 py-1 text-body-sm text-on-surface-variant bg-surface-container-low rounded-full border border-outline-variant/30">{{ node.text }}</span>
                 </div>
               </template>
             </div>
           </template>
         </div>
 
-        <div
-          v-if="agentTags.length > 1"
-          class="h-12 flex-shrink-0 border-t-2 border-dashed border-green-200 bg-green-50/50 flex items-center px-4 gap-2 overflow-x-auto max-w-full"
-        >
-          <span class="text-xs text-gray-500 whitespace-nowrap font-medium">子代理:</span>
-          <button
-            v-for="tag in agentTags"
-            :key="tag.sessionId"
+        <!-- 子代理底部标签 -->
+        <div v-if="agentTags.length > 1"
+          class="h-10 md:h-12 flex-shrink-0 border-t-2 border-dashed border-emerald-200 bg-surface-container-low flex items-center px-2 md:px-4 gap-1.5 md:gap-2 overflow-x-auto max-w-full">
+          <span class="text-label-md text-on-surface-variant whitespace-nowrap flex-shrink-0">子代理:</span>
+          <button v-for="tag in agentTags" :key="tag.sessionId"
             @click="switchToAgent(tag.sessionId)"
-            class="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors border"
+            class="px-2 md:px-3 py-1 md:py-1.5 rounded-full text-body-sm font-medium whitespace-nowrap transition-colors border flex-shrink-0"
             :class="currentSessionId === tag.sessionId
-              ? 'bg-green-600 text-white border-green-600'
+              ? 'bg-primary text-on-primary border-primary'
               : tag.loaded
-                ? 'bg-white text-green-700 border-green-200 hover:bg-green-100'
-                : 'bg-gray-50 text-gray-400 border-dashed border-gray-300 hover:bg-green-50 hover:text-green-600'"
-          >
+                ? 'bg-surface-container-lowest text-on-surface-variant border-outline-variant hover:bg-surface hover:border-outline'
+                : 'bg-surface-container-low text-outline border-dashed border-outline-variant hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'">
             {{ tag.label }}
           </button>
         </div>
@@ -246,11 +360,22 @@
   </div>
 </div>
 
-<script>
-const { createApp, ref, reactive, computed, nextTick, watch, onUnmounted } = Vue
+<!-- Vue + Libraries (ESM import map) -->
+<script type="importmap">
+{
+  "imports": {
+    "vue": "https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js"
+  }
+}
+</script>
 
-createApp({
+<script type="module">
+import { createApp, ref, reactive, computed, nextTick, watch, onUnmounted } from 'vue'
+
+const app = createApp({
   setup() {
+
+    /* ===== 响应式状态 ===== */
     const projects = ref([])
     const conversations = ref([])
     const activeConv = ref(null)
@@ -260,6 +385,7 @@ createApp({
     const mainDiscoveredSubs = ref([])
     const msgContainer = ref(null)
     const sidebarCollapsed = ref(false)
+    const sidebarOpen = ref(false)
     const searchQuery = ref('')
     const loading = ref(false)
     const totalConvs = ref(0)
@@ -275,26 +401,20 @@ createApp({
     let loadMoreTimer = null
     const batchSize = 20
     let refreshTimer = null
-    let scrollRaf = null
     let msgObserver = null
 
     const msgVisible = reactive({})
     const msgHeights = reactive({})
-    const observerInitialized = ref(false)
 
-    /* ========== API 数据加载 ========== */
+    /* ===== API 数据加载 ===== */
 
     async function loadProjects() {
-      console.log('[API] loadAll start')
       loading.value = true
       try {
         const res = await fetch('/api/all-conversations')
         const json = await res.json()
-        console.log('[API] loadAll result: success=', json.success)
         if (json.success && json.data) {
           projects.value = json.data.projects || []
-
-          // 一次性填充所有项目对话缓存
           const all = []
           projects.value.forEach(proj => {
             const convs = (proj.conversations || []).map(c => ({
@@ -312,11 +432,9 @@ createApp({
           all.sort((a, b) => b.timestamp - a.timestamp)
           conversations.value = all
           totalConvs.value = json.data.total_convs || all.length
-
           const s = new Set()
           projects.value.forEach(p => s.add(p.name))
           collapsedProjects.value = s
-          console.log('[API] loadAll done: projects=', projects.value.length, 'convs=', totalConvs.value)
         }
       } catch (e) {
         console.error('[API] loadAll error:', e)
@@ -326,8 +444,7 @@ createApp({
 
     function toggleProject(name) {
       const s = new Set(collapsedProjects.value)
-      if (s.has(name)) s.delete(name)
-      else s.add(name)
+      s.has(name) ? s.delete(name) : s.add(name)
       collapsedProjects.value = s
     }
 
@@ -335,9 +452,9 @@ createApp({
       return collapsedProjects.value.has(name)
     }
 
-    /* ========== 选择对话 ========== */
+    /* ===== 选择对话 ===== */
+
     async function selectConversation(conv) {
-      console.log('[API] selectConversation:', conv.sessionId)
       activeConv.value = conv
       agentChain.value = []
       currentSessionId.value = conv.sessionId
@@ -358,25 +475,20 @@ createApp({
     }
 
     async function loadAndRender(conv, isSubAgent, isRefresh) {
-      console.log('[API] loadAndRender:', conv.sessionId, 'isSubAgent:', isSubAgent)
       let text
       if (isSubAgent) {
         text = conv._cachedContent
       } else {
-        // 从 API 加载
         const projectName = conv.projectName || activeConv.value?._projectName
-        const url = `/api/projects/${encodeURIComponent(projectName)}/conversations/${conv.sessionId}`
-        console.log('[API] loadAndRender url:', url)
+        const url = '/api/projects/' + encodeURIComponent(projectName) + '/conversations/' + conv.sessionId
         const res = await fetch(url)
         const json = await res.json()
-        console.log('[API] loadAndRender success:', json.success, 'messages:', json.data?.messages?.length)
-        if (!json.success) { console.error('[API] loadAndRender failed:', json.error); return }
+        if (!json.success) return
         text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
         conv._cachedContent = text
       }
 
       const rawLines = text.trim().split('\n')
-
       const parsedLines = []
       const idMap = {}
       const childrenMap = {}
@@ -402,10 +514,8 @@ createApp({
         const children = childrenMap[id]
         if (children) children.forEach(child => dfs(child.id))
       }
-
       const roots = childrenMap['__root__'] || []
       roots.forEach(d => dfs(d.id))
-
       for (const d of parsedLines) {
         if (visited.has(d.id)) continue
         dfs(d.id)
@@ -418,14 +528,10 @@ createApp({
         }
       })
       activeConvData.value = { nodes: allNodes, idMap, conv, text, discoveredSubs }
-
-      if (!isSubAgent) {
-        mainDiscoveredSubs.value = discoveredSubs
-      }
+      if (!isSubAgent) mainDiscoveredSubs.value = discoveredSubs
 
       nextTick(() => {
-        if (isRefresh) {
-        } else if (msgContainer.value) {
+        if (!isRefresh && msgContainer.value) {
           msgContainer.value.scrollTop = msgContainer.value.scrollHeight
           autoScroll.value = true
         }
@@ -434,10 +540,10 @@ createApp({
 
     function renderNode(d, nodes, depth) {
       switch (d.type) {
-        case 'message': {
+        case 'message':
           if (d.role === 'user') {
             const raw = extractText(d.content)
-            const qm = raw.match(/<user_query>(.*?)<\/user_query>/s)
+            const qm = raw.match(/<user_query>([\s\S]*?)<\/user_query>/s)
             const text = qm ? qm[1].trim() : raw
             if (text) nodes.push({ id: d.id, type: 'user', text, depth })
           } else if (d.role === 'assistant') {
@@ -445,8 +551,7 @@ createApp({
             if (text) nodes.push({ id: d.id, type: 'assistant', text, depth })
           }
           break
-        }
-        case 'function_call': {
+        case 'function_call':
           if (!d.name && !d.function) break
           const fnName = d.name || d.function?.name || '?'
           let fnArgs = ''
@@ -456,8 +561,7 @@ createApp({
           } catch { fnArgs = d.arguments || '' }
           nodes.push({ id: d.id, type: 'tool_call', fnName, fnArgs, depth, collapsed: false })
           break
-        }
-        case 'function_call_result': {
+        case 'function_call_result':
           if (d.name === 'Agent') {
             const sa = d.providerData?.toolResult?.subAgent
             const agentId = sa?.sessionId || d.callId || '?'
@@ -471,58 +575,37 @@ createApp({
             }
           }
           break
-        }
-        case 'reasoning':
-        case 'file-history-snapshot':
-          break
-        default:
-          nodes.push({ id: d.id, type: 'system', text: `[${d.type}]`, depth })
+        case 'reasoning': case 'file-history-snapshot': break
+        default: nodes.push({ id: d.id, type: 'system', text: `[${d.type}]`, depth })
       }
     }
 
-    /* ========== 子代理跳转 ========== */
-    async function jumpToSubAgent(node) {
-      await loadSubAgentBySessionId(node.agentId, node.taskPreview)
-    }
+    /* ===== 子代理 ===== */
+
+    async function jumpToSubAgent(node) { await loadSubAgentBySessionId(node.agentId, node.taskPreview) }
 
     async function loadSubAgentBySessionId(sessionId, taskPreview) {
       if (!activeConv.value) return
-
       const existing = agentChain.value.findIndex(a => a.sessionId === sessionId)
-      if (existing >= 0) {
-        currentSessionId.value = sessionId
-        await loadAndRender(agentChain.value[existing], true)
-        return
-      }
-
+      if (existing >= 0) { currentSessionId.value = sessionId; await loadAndRender(agentChain.value[existing], true); return }
       const mainConv = activeConv.value
       const projectName = mainConv._projectName || mainConv.projectName
-      const url = `/api/projects/${encodeURIComponent(projectName)}/conversations/${mainConv.sessionId}/subagents/${sessionId}`
-
-      console.log('[API] loadSubAgent:', url)
-      const res = await fetch(url)
-      const json = await res.json()
+      let url = '/api/projects/' + encodeURIComponent(projectName) + '/conversations/' + mainConv.sessionId + '/subagents/' + sessionId
+      let res = await fetch(url)
+      let json = await res.json()
       if (!json.success) {
-        const fallbackUrl = `/api/projects/${encodeURIComponent(projectName)}/conversations/${mainConv.sessionId}/subagents/agent-${sessionId}`
-        console.log('[API] loadSubAgent fallback:', fallbackUrl)
-        const res2 = await fetch(fallbackUrl)
-        const json2 = await res2.json()
-        if (!json2.success) {
-          alert(`找不到子代理: ${sessionId}`)
-          return
-        }
-        json.data = json2.data
+        const fallbackUrl = '/api/projects/' + encodeURIComponent(projectName) + '/conversations/' + mainConv.sessionId + '/subagents/agent-' + sessionId
+        res = await fetch(fallbackUrl)
+        json = await res.json()
+        if (!json.success) { alert('找不到子代理: ' + sessionId); return }
       }
-
       const text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
-
       const newAgent = {
         sessionId,
-        label: `${sessionId.slice(0, 16)} — ${(taskPreview || '').slice(0, 20)}`,
+        label: sessionId.slice(0, 16) + ' \u2014 ' + (taskPreview || '').slice(0, 20),
         _cachedContent: text,
         title: taskPreview || sessionId,
       }
-
       agentChain.value = [...agentChain.value, newAgent]
       currentSessionId.value = sessionId
       displayCount.value = batchSize
@@ -542,53 +625,36 @@ createApp({
         initMsgVisibility()
       } else {
         const tag = agentTags.value.find(t => t.sessionId === sessionId)
-        if (tag && !tag.loaded) {
-          loadSubAgentBySessionId(sessionId, tag.discovered?.taskPreview || '')
-        } else if (tag && tag.loaded) {
+        if (tag && !tag.loaded) loadSubAgentBySessionId(sessionId, tag.discovered?.taskPreview || '')
+        else if (tag && tag.loaded) {
           currentSessionId.value = sessionId
           displayCount.value = batchSize
           Object.keys(msgVisible).forEach(k => delete msgVisible[k])
           Object.keys(msgHeights).forEach(k => delete msgHeights[k])
           const target = agentChain.value.find(a => a.sessionId === sessionId)
-          if (target) {
-            await loadAndRender(target, true)
-            initMsgVisibility()
-          }
+          if (target) { await loadAndRender(target, true); initMsgVisibility() }
         }
       }
     }
 
-    /* ========== Computed ========== */
-    const filteredProjects = computed(() => {
-      if (!searchQuery.value) {
-        const groups = {}
-        conversations.value.forEach(c => {
-          const pn = c.projectName || '(未命名)'
-          if (!groups[pn]) groups[pn] = []
-          groups[pn].push(c)
-        })
-        return Object.entries(groups).map(([name, convs]) => ({
-          key: name, projectName: name, convs
-        }))
-      }
+    /* ===== Computed ===== */
 
-      const q = searchQuery.value.toLowerCase()
-      const filtered = conversations.value.filter(c => c.title.toLowerCase().includes(q))
+    const filteredProjects = computed(() => {
+      const list = searchQuery.value
+        ? conversations.value.filter(c => c.title.toLowerCase().includes(searchQuery.value.toLowerCase()))
+        : conversations.value
       const groups = {}
-      filtered.forEach(c => {
+      list.forEach(c => {
         const pn = c.projectName || '(未命名)'
         if (!groups[pn]) groups[pn] = []
         groups[pn].push(c)
       })
-      return Object.entries(groups).map(([name, convs]) => ({
-        key: name, projectName: name, convs
-      }))
+      return Object.entries(groups).map(([name, convs]) => ({ key: name, projectName: name, convs }))
     })
 
     const renderedMessages = computed(() => {
       const nodes = activeConvData.value?.nodes || []
-      if (nodes.length <= displayCount.value) return nodes
-      return nodes.slice(nodes.length - displayCount.value)
+      return nodes.length <= displayCount.value ? nodes : nodes.slice(nodes.length - displayCount.value)
     })
 
     const agentTags = computed(() => {
@@ -601,57 +667,57 @@ createApp({
         if (loadedMap[ds.sessionId]) {
           tags.push({ sessionId: ds.sessionId, label: loadedMap[ds.sessionId].label, loaded: true })
         } else {
-          tags.push({
-            sessionId: ds.sessionId,
-            label: `${ds.sessionId.slice(0, 16)} — ${(ds.taskPreview || '').slice(0, 20)}`,
-            loaded: false,
-            discovered: ds,
-          })
+          tags.push({ sessionId: ds.sessionId, label: ds.sessionId.slice(0, 16) + ' \u2014 ' + (ds.taskPreview || '').slice(0, 20), loaded: false, discovered: ds })
         }
       })
       return tags
     })
 
+    /* ===== 渲染工具 ===== */
+
     function renderMarkdown(text) {
       if (!text) return ''
       let html = text
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/@image#\d+:\S+(\.png|\.jpg|\.jpeg|\.gif|\.webp)?/gi, '<span class="text-gray-400 text-xs">[图片]</span>')
-        .replace(/@([\w./\\-]+)/g, '<code class="text-xs">@$1</code>')
+        .replace(/@image#\d+:\S+(\.png|\.jpg|\.jpeg|\.gif|\.webp)?/gi, '<span class="text-outline text-xs">[图片]</span>')
+        .replace(/@([\w./\\-]+)/g, '<code>$1</code>')
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/`([^`]+)`/g, '<code>$1</code>')
         .replace(/\n/g, '<br>')
       return html
     }
 
-    /* ========== 定时刷新 ========== */
+    function extractText(content) {
+      if (typeof content === 'string') {
+        const qm = content.match(/<user_query>([\s\S]*?)<\/user_query>/s)
+        return qm ? qm[1].trim() : content
+      }
+      if (Array.isArray(content)) return content.filter(b => b && typeof b === 'object').map(b => b.text || b.input_text || b.output_text || '').join('\n')
+      if (content && typeof content === 'object' && content.text) return content.text
+      return ''
+    }
+
+    /* ===== 定时刷新 ===== */
+
     function startAutoRefresh() {
       stopAutoRefresh()
       const ms = Math.max(1, refreshInterval.value || 5) * 1000
       refreshTimer = setInterval(refreshCurrentView, ms)
     }
-
-    function stopAutoRefresh() {
-      if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
-    }
+    function stopAutoRefresh() { if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null } }
 
     function onMsgScroll() {
       if (!msgContainer.value) return
       const el = msgContainer.value
-      const threshold = scrollThreshold.value || 80
-      autoScroll.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold
+      autoScroll.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < scrollThreshold.value
       if (el.scrollTop < 180 && !isLoadingMore.value && !loadMoreTimer) {
-        loadMoreTimer = setTimeout(() => {
-          loadMoreTimer = null
-          loadMoreMessages()
-        }, 300)
+        loadMoreTimer = setTimeout(() => { loadMoreTimer = null; loadMoreMessages() }, 300)
       }
     }
 
     function loadMoreMessages() {
       const nodes = activeConvData.value?.nodes || []
-      if (displayCount.value >= nodes.length) return
-      if (isLoadingMore.value) return
+      if (displayCount.value >= nodes.length || isLoadingMore.value) return
       isLoadingMore.value = true
       const el = msgContainer.value
       const oldScrollHeight = el ? el.scrollHeight : 0
@@ -659,8 +725,7 @@ createApp({
       nextTick(() => {
         requestAnimationFrame(() => {
           if (el) {
-            const newScrollHeight = el.scrollHeight
-            el.scrollTop = (el.scrollTop || 0) + (newScrollHeight - oldScrollHeight)
+            el.scrollTop = (el.scrollTop || 0) + (el.scrollHeight - oldScrollHeight)
           }
           const allNodes = activeConvData.value?.nodes || []
           allNodes.forEach(n => { if (!(n.id in msgVisible)) msgVisible[n.id] = true })
@@ -669,14 +734,15 @@ createApp({
       })
     }
 
-    /* ========== 可见性优化 ========== */
+    /* ===== IntersectionObserver ===== */
+
     function setupMsgObserver() {
       destroyMsgObserver()
       if (!msgContainer.value) return
       msgObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
+        for (const entry of entries) {
           const id = entry.target.dataset.msgId
-          if (!id) return
+          if (!id) continue
           if (entry.isIntersecting) {
             msgVisible[id] = true
             nextTick(() => {
@@ -695,36 +761,14 @@ createApp({
             msgVisible[id] = false
             entry.target.style.height = (msgHeights[id] || 80) + 'px'
           }
-        })
-      }, {
-        root: msgContainer.value,
-        rootMargin: '400px 0px 400px 0px',
-      })
-      observerInitialized.value = true
-    }
-
-    function destroyMsgObserver() {
-      if (msgObserver) { msgObserver.disconnect(); msgObserver = null }
-      observerInitialized.value = false
-    }
-
-    function observeMsg(id, el) {
-      if (!el || !msgObserver) return
-      if (el.dataset.msgObserved) return
-      el.dataset.msgId = id
-      el.dataset.msgObserved = '1'
-      msgObserver.observe(el)
-    }
-
-    function scrollToBottom(force) {
-      if (!msgContainer.value) return
-      if (!autoScroll.value && !force) return
-      cancelAnimationFrame(scrollRaf)
-      scrollRaf = requestAnimationFrame(() => {
-        if (msgContainer.value) {
-          msgContainer.value.scrollTop = msgContainer.value.scrollHeight
         }
-      })
+      }, { root: msgContainer.value, rootMargin: '400px 0px 400px 0px' })
+    }
+    function destroyMsgObserver() { if (msgObserver) { msgObserver.disconnect(); msgObserver = null } }
+    function observeMsg(id, el) {
+      if (!el || !msgObserver || el.dataset.msgObserved) return
+      el.dataset.msgId = id; el.dataset.msgObserved = '1'
+      msgObserver.observe(el)
     }
 
     function snapshotCollapsed(nodes) {
@@ -732,11 +776,8 @@ createApp({
       nodes.forEach(n => { if (n.type === 'tool_call') map[n.id] = n.collapsed })
       return map
     }
-
     function restoreCollapsed(nodes, map) {
-      nodes.forEach(n => {
-        if (n.type === 'tool_call' && map[n.id] !== undefined) n.collapsed = map[n.id]
-      })
+      nodes.forEach(n => { if (n.type === 'tool_call' && map[n.id] !== undefined) n.collapsed = map[n.id] })
     }
 
     async function refreshCurrentView() {
@@ -752,45 +793,23 @@ createApp({
       nodes.forEach(n => { if (!(n.id in msgVisible)) msgVisible[n.id] = true })
       await nextTick()
       restoreCollapsed(activeConvData.value?.nodes || [], collapsedMap)
-      setTimeout(() => scrollToBottom(), 300)
+      setTimeout(() => { if (msgContainer.value && autoScroll.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }, 300)
     }
 
-    watch(autoRefresh, (val) => {
-      if (val) startAutoRefresh()
-      else stopAutoRefresh()
-    })
+    watch(autoRefresh, v => v ? startAutoRefresh() : stopAutoRefresh())
+    watch(refreshInterval, () => { if (autoRefresh.value) startAutoRefresh() })
 
-    watch(refreshInterval, (val) => {
-      if (autoRefresh.value) startAutoRefresh()
-    })
+    /* ===== 工具 ===== */
 
-    /* ========== 工具函数 ========== */
-    function tryParse(line) {
-      try { return JSON.parse(line) } catch { return null }
-    }
+    function tryParse(line) { try { return JSON.parse(line) } catch { return null } }
 
-    function extractText(content) {
-      if (typeof content === 'string') {
-        const qm = content.match(/<user_query>([\s\S]*?)<\/user_query>/s)
-        if (qm) return qm[1].trim()
-        return content
-      }
-      if (Array.isArray(content)) {
-        return content
-          .filter(b => b && typeof b === 'object')
-          .map(b => b.text || b.input_text || b.output_text || '')
-          .join('\n')
-      }
-      if (content && typeof content === 'object' && content.text) return content.text
-      return ''
-    }
+    /* ===== 初始化 ===== */
 
-    /* ========== 初始化 ========== */
     loadProjects()
+    if (window.innerWidth < 768) sidebarCollapsed.value = true
 
     onUnmounted(() => {
       stopAutoRefresh()
-      cancelAnimationFrame(scrollRaf)
       clearTimeout(loadMoreTimer)
       destroyMsgObserver()
     })
@@ -798,15 +817,18 @@ createApp({
     return {
       projects, conversations, activeConv, activeConvData, agentChain,
       currentSessionId, msgContainer, searchQuery, loading, totalConvs,
-      collapsedProjects, projectConvCache,
+      collapsedProjects, projectConvCache, sidebarCollapsed, sidebarOpen,
       filteredProjects, renderedMessages, agentTags,
-      sidebarCollapsed, autoRefresh, refreshInterval, autoScroll, scrollThreshold, displayCount,
+      autoRefresh, refreshInterval, autoScroll, scrollThreshold, displayCount,
       loadProjects, toggleProject, isProjectCollapsed,
       selectConversation, jumpToSubAgent, switchToAgent,
       renderMarkdown, onMsgScroll, observeMsg, msgVisible, msgHeights,
+      refreshCurrentView,
     }
   }
-}).mount('#app')
+})
+
+app.mount('#app')
 </script>
 </body>
 </html>
