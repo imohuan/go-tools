@@ -759,6 +759,10 @@
               discoveredSubs.push({ sessionId: n.agentId, taskPreview: n.taskPreview })
             }
           })
+          // 保存滚动位置（无感刷新用）
+          const savedScrollTop = msgContainer.value ? msgContainer.value.scrollTop : 0
+          const savedScrollHeight = msgContainer.value ? msgContainer.value.scrollHeight : 0
+
           // 设置滚动标志位（必须在 activeConvData 赋值之前，watch 同步触发）
           if (isIncremental && wasSnapped) {
             snapBeforeInsert.value = true
@@ -768,8 +772,25 @@
           activeConvData.value = { nodes: allNodes, idMap, conv, text, discoveredSubs }
           if (!isSubAgent) mainDiscoveredSubs.value = discoveredSubs
 
-          // 全量加载：若 autoScroll 开启 且 没有待处理的增量滚动 → 瞬间滚动到底部
-          if (!isIncremental && autoScroll.value && !pendingScroll.value) {
+          // 无感刷新：恢复滚动位置
+          if (isIncremental) {
+            nextTick(() => {
+              if (!msgContainer.value) return
+              const el = msgContainer.value
+              if (wasSnapped) {
+                // 吸附模式下由 watch 统一处理 smooth 滚动，这里不做额外操作
+              } else {
+                // 非吸附：新数据追加到底部，用户浏览位置不变
+                // scrollHeight 增加了 diff，但 scrollTop 保持原值
+                const newH = el.scrollHeight
+                const diff = newH - savedScrollHeight
+                // 如果 diff > 0(有新数据) 且用户不在顶部，保持相对位置
+                if (diff > 0 && savedScrollTop > 0) {
+                  el.scrollTop = savedScrollTop
+                }
+              }
+            })
+          } else if (!isIncremental && autoScroll.value && !pendingScroll.value) {
             nextTick(() => {
               if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight
             })
@@ -834,10 +855,12 @@
           const json = await res.json()
           if (!json.success) { alert('找不到子代理: ' + sessionId); return }
           const text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
+          const newestTs = json.data.newest_ts || 0
           const newAgent = {
             sessionId,
             label: sessionId.slice(0, 16) + ' \u2014 ' + (taskPreview || '').slice(0, 20),
             _cachedContent: text,
+            _lastTs: newestTs,
             title: taskPreview || sessionId,
           }
           agentChain.value = [...agentChain.value, newAgent]
@@ -982,25 +1005,82 @@
           }
         }
 
-        // 重新拉取子代理全量数据
+        // 重新拉取子代理全量数据（支持 since 增量）
         async function refreshSubAgentData(agent) {
           if (!activeConv.value) return
           const mainConv = activeConv.value
           const projectName = mainConv._projectName || mainConv.projectName
-          const url = '/api/projects/' + encodeURIComponent(projectName) + '/conversations/' + mainConv.sessionId + '/subagents/' + agent.sessionId
+          let url = '/api/projects/' + encodeURIComponent(projectName) + '/conversations/' + mainConv.sessionId + '/subagents/' + agent.sessionId
+          if (agent._lastTs) url += '?since=' + agent._lastTs
           try {
             const res = await fetch(url)
             const json = await res.json()
             if (!json.success) return
-            const text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
-            // 捕获吸附状态（子代理也走增量插入逻辑）
+            const newText = json.data.messages.map(m => JSON.stringify(m)).join('\n')
+            if (json.data.newest_ts) agent._lastTs = json.data.newest_ts
+
             const wasSnapped = isSnapped.value
+
+            // 保存滚动位置
+            const savedTop = msgContainer.value ? msgContainer.value.scrollTop : 0
+            const savedH = msgContainer.value ? msgContainer.value.scrollHeight : 0
+
+            if (agent._lastTs && newText) {
+              // 增量模式：追加新数据
+              agent._cachedContent = (agent._cachedContent || '') + '\n' + newText
+            } else if (!agent._lastTs) {
+              // 全量模式（首次加载）
+              agent._cachedContent = newText
+            }
+            // else: since 返回空，无新数据，保持不变
+
+            // 全量重解析子代理节点
+            const rawLines = agent._cachedContent.trim().split('\n')
+            const parsedLines = [], idMap = {}, childrenMap = {}, skipTypes = new Set(['file-history-snapshot', 'reasoning'])
+            for (let i = 0; i < rawLines.length; i++) {
+              try { var d = JSON.parse(rawLines[i]) } catch (e) { continue }
+              if (!d || !d.id || skipTypes.has(d.type)) continue
+              parsedLines.push(d)
+              idMap[d.id] = d
+              const pid = d.parentId || '__root__'
+              if (!childrenMap[pid]) childrenMap[pid] = []
+              childrenMap[pid].push(d)
+            }
+            const allNodes = [], visited = new Set()
+            function dfs(id) {
+              const d = idMap[id]
+              if (!d || visited.has(id)) return
+              visited.add(id)
+              renderNode(d, allNodes, 0)
+              const children = childrenMap[id]
+              if (children) children.forEach(child => dfs(child.id))
+            }
+            const roots = childrenMap['__root__'] || []
+            roots.forEach(d => dfs(d.id))
+            for (const d of parsedLines) { if (visited.has(d.id)) continue; dfs(d.id) }
+
+            // 设置吸附滚动标志
             if (wasSnapped) {
               snapBeforeInsert.value = true
               pendingScroll.value = true
             }
-            agent._cachedContent = text
-            await loadAndRender(agent, true)
+
+            // 更新渲染数据
+            activeConvData.value = { nodes: allNodes, idMap, conv: agent, text: agent._cachedContent, discoveredSubs: [] }
+
+            // 无感恢复：非吸附时原地不动
+            nextTick(() => {
+              if (!msgContainer.value) return
+              const el = msgContainer.value
+              if (!wasSnapped) {
+                const newH = el.scrollHeight
+                const diff = newH - savedH
+                if (diff > 0 && savedTop > 0) {
+                  el.scrollTop = savedTop
+                }
+              }
+              // 吸附模式由 watch 统一滚动
+            })
           } catch (e) {
             console.error('[刷新] 子代理刷新失败:', e)
           }
@@ -1057,6 +1137,10 @@
           const wasSnapped = isSnapped.value
           const existingNodes = activeConvData.value.nodes || []
 
+          // 保存滚动位置（无感恢复用）
+          const savedTop = msgContainer.value ? msgContainer.value.scrollTop : 0
+          const savedH = msgContainer.value ? msgContainer.value.scrollHeight : 0
+
           // 追加 raw 数据到缓存
           if (rawLines.length > 0) {
             conv._cachedContent = (conv._cachedContent || '') + '\n' + rawLines.join('\n')
@@ -1079,6 +1163,19 @@
             conv,
             text: conv._cachedContent,
             discoveredSubs: activeConvData.value.discoveredSubs || []
+          }
+
+          // 无感恢复：非吸附时滚动位置不动
+          if (!wasSnapped) {
+            nextTick(() => {
+              if (msgContainer.value) {
+                const el = msgContainer.value
+                const diff = el.scrollHeight - savedH
+                if (diff > 0 && savedTop > 0) {
+                  el.scrollTop = savedTop
+                }
+              }
+            })
           }
 
           console.log('[appendNodesAndScroll] ' + existingNodes.length + ' → ' + allNodes.length + ' nodes, wasSnapped=' + wasSnapped + ', pending=' + pendingScroll.value)

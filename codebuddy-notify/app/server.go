@@ -374,11 +374,43 @@ func (s *Server) getSubAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+
+	sinceStr := r.URL.Query().Get("since")
+	var sinceTS int64
+	var newestTS int64
+	if sinceStr != "" {
+		sinceTS, _ = strconv.ParseInt(sinceStr, 10, 64)
+	}
+
 	var messages []json.RawMessage
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
+
+		// 始终追踪最新时间戳
+		var peek map[string]interface{}
+		if json.Unmarshal([]byte(line), &peek) == nil {
+			if ts, ok := peek["timestamp"].(float64); ok {
+				ti := int64(ts)
+				if ti > newestTS {
+					newestTS = ti
+				}
+			}
+		}
+
+		// since 过滤
+		if sinceTS > 0 {
+			var peek2 map[string]interface{}
+			if json.Unmarshal([]byte(line), &peek2) == nil {
+				if ts, ok := peek2["timestamp"].(float64); ok {
+					if int64(ts) <= sinceTS {
+						continue
+					}
+				}
+			}
+		}
+
 		messages = append(messages, json.RawMessage(line))
 	}
 
@@ -386,6 +418,7 @@ func (s *Server) getSubAgent(w http.ResponseWriter, r *http.Request) {
 		"session_id": agentID,
 		"messages":   messages,
 		"total":      len(messages),
+		"newest_ts":  newestTS,
 	}})
 }
 
