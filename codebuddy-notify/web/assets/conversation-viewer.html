@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkBuddy 对话查看器</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+  :root {
+    --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  body { font-family: var(--font-sans); }
+
+  .msg-content { line-height: 1.7; }
+  .msg-content p { margin-bottom: 0.5em; }
+  .msg-content pre {
+    background: #1e1e2e; color: #cdd6f4; padding: 12px 16px; border-radius: 8px;
+    overflow-x: auto; font-size: 12px; font-family: var(--font-mono); margin: 8px 0;
+  }
+  .msg-content code {
+    background: rgba(0,0,0,0.06); padding: 2px 5px; border-radius: 4px;
+    font-size: 0.9em; font-family: var(--font-mono);
+  }
+  .msg-content pre code { background: none; padding: 0; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #d0d5dd; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #b0b5bd; }
+
+  .fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
+  .fade-enter-from, .fade-leave-to { opacity: 0; }
+</style>
+</head>
+<body class="h-full bg-white text-gray-900 antialiased">
+<div id="app" class="h-full flex flex-col">
+  <header class="h-12 flex items-center px-4 gap-3 border-b border-gray-200 bg-white flex-shrink-0 z-10">
+    <button
+      @click="sidebarCollapsed = !sidebarCollapsed"
+      class="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors flex-shrink-0"
+      :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+    >
+      <svg class="w-4 h-4 text-gray-500 transition-transform" :class="sidebarCollapsed ? '' : 'rotate-180'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M15 18l-6-6 6-6"/>
+      </svg>
+    </button>
+    <div class="flex gap-1.5">
+      <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]"></span>
+      <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]"></span>
+      <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]"></span>
+    </div>
+    <span class="font-semibold text-sm tracking-tight">WB 对话查看器 (API)</span>
+    <span class="text-xs text-gray-400 truncate max-w-[200px]">{{ projects.length }} 项目</span>
+
+    <div v-if="activeConv" class="ml-auto flex items-center gap-2.5">
+      <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+        <input type="checkbox" v-model="autoRefresh" class="w-3.5 h-3.5 rounded border-gray-300 text-green-600 focus:ring-green-500" />
+        定时刷新
+      </label>
+      <input v-if="autoRefresh" v-model.number="refreshInterval" type="number" min="1" max="60"
+        class="w-12 px-1 py-0.5 text-xs text-center border border-gray-200 rounded" title="刷新间隔（秒）" />
+      <span v-if="autoRefresh" class="text-[10px] text-gray-400">秒</span>
+      <span class="text-gray-200">|</span>
+      <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+        <input type="checkbox" v-model="autoScroll" class="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+        自动滚动
+      </label>
+      <input v-model.number="scrollThreshold" type="number" min="20" max="500" step="10"
+        class="w-12 px-1 py-0.5 text-xs text-center border border-gray-200 rounded" title="吸附阈值" />
+      <span class="text-[10px] text-gray-400">px</span>
+      <span v-if="autoRefresh" class="text-[10px] text-green-500 animate-pulse">●</span>
+    </div>
+  </header>
+
+  <div class="flex flex-1 overflow-hidden">
+    <aside
+      class="flex-shrink-0 flex flex-col bg-gray-50 border-r border-gray-200 transition-all duration-200 overflow-hidden"
+      :class="sidebarCollapsed ? 'w-0 border-r-0' : 'w-[320px]'"
+    >
+      <div class="p-4 border-b border-gray-200 space-y-3">
+        <div class="flex items-center gap-2">
+          <button @click="loadProjects" :disabled="loading" class="text-xs px-2 py-1 rounded text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50">
+            {{ loading ? '加载中...' : '⟳ 刷新' }}
+          </button>
+          <span class="text-xs text-gray-400">{{ projects.length }} 项目 / {{ totalConvs }} 对话</span>
+        </div>
+        <input v-model="searchQuery" type="text" placeholder="搜索对话..."
+          class="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 bg-white" />
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-2 py-1">
+        <div v-if="loading" class="flex items-center justify-center h-32">
+          <p class="text-sm text-gray-400">加载中...</p>
+        </div>
+        <div v-else-if="filteredProjects.length === 0" class="flex items-center justify-center h-32">
+          <p class="text-sm text-gray-400">{{ searchQuery ? '无匹配结果' : '暂无数据' }}</p>
+        </div>
+
+        <template v-for="proj in filteredProjects" :key="proj.key">
+          <div class="group">
+            <div
+              @click="toggleProject(proj.projectName)"
+              class="px-3 py-1.5 mt-2 mb-0.5 flex items-center gap-1.5 text-[10px] text-gray-400 font-semibold uppercase tracking-wider cursor-pointer hover:text-gray-600 select-none"
+            >
+              <svg class="w-2.5 h-2.5 transition-transform" :class="isProjectCollapsed(proj.projectName) ? '' : 'rotate-90'" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>
+              📂 {{ proj.projectName }}
+              <span class="text-gray-300 font-normal ml-1">({{ proj.convs.length }})</span>
+            </div>
+          </div>
+
+          <div v-if="!isProjectCollapsed(proj.projectName)">
+
+            <div v-for="conv in (projectConvCache[proj.projectName] || [])" :key="conv.sessionId"
+              @click="selectConversation(conv)"
+              class="px-3 py-2.5 ml-4 mb-1 rounded-lg cursor-pointer transition-colors border"
+              :class="[activeConv && activeConv.sessionId === conv.sessionId
+                ? 'bg-indigo-50 border-indigo-300'
+                : 'bg-white border-gray-100 hover:border-gray-300 hover:bg-gray-50']"
+            >
+              <div class="text-sm font-medium text-gray-900 truncate" :title="conv.title">
+                {{ conv.title }}
+              </div>
+              <div class="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                <span>{{ conv.date }}</span>
+                <span>{{ conv.msgCount }} 条</span>
+                <span v-if="conv.subAgentCount > 0"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                  {{ conv.subAgentCount }} 子代理
+                </span>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </aside>
+
+    <section class="flex-1 flex flex-col overflow-hidden bg-white">
+      <div v-if="!activeConv" class="flex-1 flex items-center justify-center">
+        <div class="text-center">
+          <div class="text-4xl mb-3">💬</div>
+          <p class="text-gray-400 text-sm">选择一个项目展开并加载对话</p>
+        </div>
+      </div>
+
+      <template v-else>
+        <div class="px-5 py-3 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
+          <span class="font-semibold text-sm text-gray-900 truncate max-w-[400px]">
+            {{ activeConv.title }}
+          </span>
+          <div v-if="agentChain.length > 0" class="flex items-center gap-1.5 text-xs">
+            <span class="text-gray-300">|</span>
+            <button
+              v-for="(agent, idx) in agentChain"
+              :key="agent.sessionId"
+              @click="switchToAgent(idx)"
+              class="px-2 py-0.5 rounded transition-colors"
+              :class="idx === agentChain.length - 1
+                ? 'bg-indigo-100 text-indigo-700 font-medium'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'"
+            >
+              {{ agent.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-5 py-4 space-y-3" ref="msgContainer" @scroll="onMsgScroll">
+          <template v-for="node in renderedMessages" :key="node.id">
+            <div
+              v-memo="[node.id, node.collapsed, msgVisible[node.id]]"
+              :ref="el => observeMsg(node.id, el)"
+              :style="!msgVisible[node.id] && msgHeights[node.id] ? { height: msgHeights[node.id] + 'px' } : {}"
+              class="msg-wrapper overflow-hidden flex-shrink-0"
+            >
+              <template v-if="msgVisible[node.id]">
+                <div v-if="node.type === 'user'" class="flex justify-end">
+                  <div class="max-w-[80%] px-4 py-2.5 rounded-xl bg-indigo-50 border border-indigo-100 text-sm msg-content" v-html="renderMarkdown(node.text)"></div>
+                </div>
+                <div v-else-if="node.type === 'assistant'" class="flex justify-start">
+                  <div class="max-w-[80%] px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-sm msg-content" v-html="renderMarkdown(node.text)"></div>
+                </div>
+                <div v-else-if="node.type === 'tool_call'" class="rounded-lg bg-orange-50 border border-orange-200">
+                  <div class="flex items-center gap-2 px-4 py-2.5 cursor-pointer hover:bg-orange-100/50 transition-colors"
+                       @click="node.collapsed = !node.collapsed">
+                    <span class="text-orange-600 text-xs font-semibold select-none">🔧 {{ node.fnName }}</span>
+                    <span class="ml-auto text-[10px] text-gray-400 select-none">{{ node.collapsed ? '展开 ▼' : '收起 ▲' }}</span>
+                  </div>
+                  <div v-show="!node.collapsed" class="border-t border-orange-100">
+                    <div class="px-4 py-3 bg-orange-100/30">
+                      <div class="text-[10px] text-orange-500 font-medium uppercase tracking-wide mb-1.5">输入参数</div>
+                      <pre class="text-xs font-mono text-gray-600 whitespace-pre-wrap break-all m-0">{{ node.fnArgs || '(无参数)' }}</pre>
+                    </div>
+                    <div v-if="node.result" class="h-px bg-orange-200"></div>
+                    <div v-if="node.result" class="px-4 py-3 bg-white max-h-[300px] overflow-y-auto">
+                      <div class="text-[10px] text-green-600 font-medium uppercase tracking-wide mb-1.5">输出结果</div>
+                      <pre class="text-xs text-gray-700 whitespace-pre-wrap font-sans leading-relaxed m-0">{{ node.result }}</pre>
+                    </div>
+                    <div v-else class="px-4 py-2 text-xs text-gray-400 italic">等待执行结果...</div>
+                  </div>
+                </div>
+                <div
+                  v-else-if="node.type === 'subagent'"
+                  @click="jumpToSubAgent(node)"
+                  class="px-4 py-3 rounded-lg bg-green-50 border-2 border-dashed border-green-300 cursor-pointer hover:bg-green-100 hover:border-green-400 transition-colors flex items-center gap-3 group"
+                >
+                  <span class="text-lg">▶</span>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-semibold text-green-700">子代理: {{ node.agentId }}</div>
+                    <div class="text-xs text-green-600 truncate">{{ node.taskPreview || '执行任务...' }}</div>
+                  </div>
+                  <span class="text-xs text-green-500 font-medium group-hover:translate-x-1 transition-transform whitespace-nowrap">跳转 →</span>
+                </div>
+                <div v-else-if="node.type === 'system'" class="text-center">
+                  <span class="inline-block px-3 py-1 text-xs text-gray-400 bg-gray-50 rounded-full border border-gray-100">
+                    {{ node.text }}
+                  </span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+
+        <div
+          v-if="agentTags.length > 1"
+          class="h-12 flex-shrink-0 border-t-2 border-dashed border-green-200 bg-green-50/50 flex items-center px-4 gap-2 overflow-x-auto max-w-full"
+        >
+          <span class="text-xs text-gray-500 whitespace-nowrap font-medium">子代理:</span>
+          <button
+            v-for="tag in agentTags"
+            :key="tag.sessionId"
+            @click="switchToAgent(tag.sessionId)"
+            class="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors border"
+            :class="currentSessionId === tag.sessionId
+              ? 'bg-green-600 text-white border-green-600'
+              : tag.loaded
+                ? 'bg-white text-green-700 border-green-200 hover:bg-green-100'
+                : 'bg-gray-50 text-gray-400 border-dashed border-gray-300 hover:bg-green-50 hover:text-green-600'"
+          >
+            {{ tag.label }}
+          </button>
+        </div>
+      </template>
+    </section>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, reactive, computed, nextTick, watch, onUnmounted } = Vue
+
+createApp({
+  setup() {
+    const projects = ref([])
+    const conversations = ref([])
+    const activeConv = ref(null)
+    const activeConvData = ref(null)
+    const agentChain = ref([])
+    const currentSessionId = ref('')
+    const mainDiscoveredSubs = ref([])
+    const msgContainer = ref(null)
+    const sidebarCollapsed = ref(false)
+    const searchQuery = ref('')
+    const loading = ref(false)
+    const totalConvs = ref(0)
+    const collapsedProjects = ref(new Set())
+    const projectConvCache = reactive({})
+
+    const autoRefresh = ref(true)
+    const refreshInterval = ref(5)
+    const autoScroll = ref(true)
+    const scrollThreshold = ref(80)
+    const displayCount = ref(50)
+    const isLoadingMore = ref(false)
+    let loadMoreTimer = null
+    const batchSize = 20
+    let refreshTimer = null
+    let scrollRaf = null
+    let msgObserver = null
+
+    const msgVisible = reactive({})
+    const msgHeights = reactive({})
+    const observerInitialized = ref(false)
+
+    /* ========== API 数据加载 ========== */
+
+    async function loadProjects() {
+      console.log('[API] loadAll start')
+      loading.value = true
+      try {
+        const res = await fetch('/api/all-conversations')
+        const json = await res.json()
+        console.log('[API] loadAll result: success=', json.success)
+        if (json.success && json.data) {
+          projects.value = json.data.projects || []
+
+          // 一次性填充所有项目对话缓存
+          const all = []
+          projects.value.forEach(proj => {
+            const convs = (proj.conversations || []).map(c => ({
+              sessionId: c.session_id,
+              title: c.title,
+              date: c.date,
+              msgCount: c.msg_count,
+              subAgentCount: c.sub_agent_count,
+              timestamp: c.timestamp,
+              projectName: c.project_name || proj.name,
+            }))
+            projectConvCache[proj.name] = convs
+            all.push(...convs)
+          })
+          all.sort((a, b) => b.timestamp - a.timestamp)
+          conversations.value = all
+          totalConvs.value = json.data.total_convs || all.length
+
+          const s = new Set()
+          projects.value.forEach(p => s.add(p.name))
+          collapsedProjects.value = s
+          console.log('[API] loadAll done: projects=', projects.value.length, 'convs=', totalConvs.value)
+        }
+      } catch (e) {
+        console.error('[API] loadAll error:', e)
+      }
+      loading.value = false
+    }
+
+    function toggleProject(name) {
+      const s = new Set(collapsedProjects.value)
+      if (s.has(name)) s.delete(name)
+      else s.add(name)
+      collapsedProjects.value = s
+    }
+
+    function isProjectCollapsed(name) {
+      return collapsedProjects.value.has(name)
+    }
+
+    /* ========== 选择对话 ========== */
+    async function selectConversation(conv) {
+      console.log('[API] selectConversation:', conv.sessionId)
+      activeConv.value = conv
+      agentChain.value = []
+      currentSessionId.value = conv.sessionId
+      mainDiscoveredSubs.value = []
+      autoScroll.value = true
+      displayCount.value = batchSize
+      Object.keys(msgVisible).forEach(k => delete msgVisible[k])
+      Object.keys(msgHeights).forEach(k => delete msgHeights[k])
+      await loadAndRender(conv, false)
+      initMsgVisibility()
+      if (autoRefresh.value) startAutoRefresh()
+    }
+
+    function initMsgVisibility() {
+      const nodes = renderedMessages.value
+      nodes.forEach(n => { msgVisible[n.id] = true })
+      nextTick(() => { setupMsgObserver() })
+    }
+
+    async function loadAndRender(conv, isSubAgent, isRefresh) {
+      console.log('[API] loadAndRender:', conv.sessionId, 'isSubAgent:', isSubAgent)
+      let text
+      if (isSubAgent) {
+        text = conv._cachedContent
+      } else {
+        // 从 API 加载
+        const projectName = conv.projectName || activeConv.value?._projectName
+        let url
+        if (isSubAgent) {
+          const mainConv = activeConv.value
+          url = `/api/projects/${encodeURIComponent(mainConv._projectName)}/conversations/${mainConv.sessionId}/subagents/${conv.sessionId}`
+        } else {
+          url = `/api/projects/${encodeURIComponent(projectName)}/conversations/${conv.sessionId}`
+        }
+        console.log('[API] loadAndRender url:', url)
+        const res = await fetch(url)
+        const json = await res.json()
+        console.log('[API] loadAndRender success:', json.success, 'messages:', json.data?.messages?.length)
+        if (!json.success) { console.error('[API] loadAndRender failed:', json.error); return }
+        text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
+        conv._cachedContent = text
+      }
+
+      const rawLines = text.trim().split('\n')
+
+      const parsedLines = []
+      const idMap = {}
+      const childrenMap = {}
+      const skipTypes = new Set(['file-history-snapshot', 'reasoning'])
+
+      for (let i = 0; i < rawLines.length; i++) {
+        const d = tryParse(rawLines[i])
+        if (!d || !d.id || skipTypes.has(d.type)) continue
+        parsedLines.push(d)
+        idMap[d.id] = d
+        const pid = d.parentId || '__root__'
+        if (!childrenMap[pid]) childrenMap[pid] = []
+        childrenMap[pid].push(d)
+      }
+
+      const allNodes = []
+      const visited = new Set()
+      function dfs(id) {
+        const d = idMap[id]
+        if (!d || visited.has(id)) return
+        visited.add(id)
+        renderNode(d, allNodes, 0)
+        const children = childrenMap[id]
+        if (children) children.forEach(child => dfs(child.id))
+      }
+
+      const roots = childrenMap['__root__'] || []
+      roots.forEach(d => dfs(d.id))
+
+      for (const d of parsedLines) {
+        if (visited.has(d.id)) continue
+        dfs(d.id)
+      }
+
+      const discoveredSubs = []
+      allNodes.forEach(n => {
+        if (n.type === 'subagent') {
+          discoveredSubs.push({ sessionId: n.agentId, taskPreview: n.taskPreview })
+        }
+      })
+      activeConvData.value = { nodes: allNodes, idMap, conv, text, discoveredSubs }
+
+      if (!isSubAgent) {
+        mainDiscoveredSubs.value = discoveredSubs
+      }
+
+      nextTick(() => {
+        if (isRefresh) {
+        } else if (msgContainer.value) {
+          msgContainer.value.scrollTop = msgContainer.value.scrollHeight
+          autoScroll.value = true
+        }
+      })
+    }
+
+    function renderNode(d, nodes, depth) {
+      switch (d.type) {
+        case 'message': {
+          if (d.role === 'user') {
+            const raw = extractText(d.content)
+            const qm = raw.match(/<user_query>(.*?)<\/user_query>/s)
+            const text = qm ? qm[1].trim() : raw
+            if (text) nodes.push({ id: d.id, type: 'user', text, depth })
+          } else if (d.role === 'assistant') {
+            const text = extractText(d.content)
+            if (text) nodes.push({ id: d.id, type: 'assistant', text, depth })
+          }
+          break
+        }
+        case 'function_call': {
+          if (!d.name && !d.function) break
+          const fnName = d.name || d.function?.name || '?'
+          let fnArgs = ''
+          try {
+            if (d.arguments) fnArgs = JSON.stringify(JSON.parse(d.arguments), null, 2)
+            else if (d.function?.arguments) fnArgs = JSON.stringify(JSON.parse(d.function.arguments), null, 2)
+          } catch { fnArgs = d.arguments || '' }
+          nodes.push({ id: d.id, type: 'tool_call', fnName, fnArgs, depth, collapsed: false })
+          break
+        }
+        case 'function_call_result': {
+          if (d.name === 'Agent') {
+            const sa = d.providerData?.toolResult?.subAgent
+            const agentId = sa?.sessionId || d.callId || '?'
+            const taskPreview = extractText(d.output?.text || '').slice(0, 60)
+            nodes.push({ id: d.id, type: 'subagent', agentId, taskPreview, depth })
+          } else {
+            const last = nodes[nodes.length - 1]
+            if (last && last.type === 'tool_call') {
+              last.result = extractText(d.output?.text || d.content || '')
+              last.collapsed = false
+            }
+          }
+          break
+        }
+        case 'reasoning':
+        case 'file-history-snapshot':
+          break
+        default:
+          nodes.push({ id: d.id, type: 'system', text: `[${d.type}]`, depth })
+      }
+    }
+
+    /* ========== 子代理跳转 ========== */
+    async function jumpToSubAgent(node) {
+      await loadSubAgentBySessionId(node.agentId, node.taskPreview)
+    }
+
+    async function loadSubAgentBySessionId(sessionId, taskPreview) {
+      if (!activeConv.value) return
+
+      const existing = agentChain.value.findIndex(a => a.sessionId === sessionId)
+      if (existing >= 0) {
+        currentSessionId.value = sessionId
+        await loadAndRender(agentChain.value[existing], true)
+        return
+      }
+
+      const mainConv = activeConv.value
+      const projectName = mainConv._projectName || mainConv.projectName
+      const url = `/api/projects/${encodeURIComponent(projectName)}/conversations/${mainConv.sessionId}/subagents/${sessionId}`
+
+      console.log('[API] loadSubAgent:', url)
+      const res = await fetch(url)
+      const json = await res.json()
+      if (!json.success) {
+        const fallbackUrl = `/api/projects/${encodeURIComponent(projectName)}/conversations/${mainConv.sessionId}/subagents/agent-${sessionId}`
+        console.log('[API] loadSubAgent fallback:', fallbackUrl)
+        const res2 = await fetch(fallbackUrl)
+        const json2 = await res2.json()
+        if (!json2.success) {
+          alert(`找不到子代理: ${sessionId}`)
+          return
+        }
+        json.data = json2.data
+      }
+
+      const text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
+
+      const newAgent = {
+        sessionId,
+        label: `${sessionId.slice(0, 16)} — ${(taskPreview || '').slice(0, 20)}`,
+        _cachedContent: text,
+        title: taskPreview || sessionId,
+      }
+
+      agentChain.value = [...agentChain.value, newAgent]
+      currentSessionId.value = sessionId
+      displayCount.value = batchSize
+      Object.keys(msgVisible).forEach(k => delete msgVisible[k])
+      Object.keys(msgHeights).forEach(k => delete msgHeights[k])
+      await loadAndRender(newAgent, true)
+      initMsgVisibility()
+    }
+
+    async function switchToAgent(sessionId) {
+      if (sessionId === activeConv.value?.sessionId) {
+        currentSessionId.value = sessionId
+        displayCount.value = batchSize
+        Object.keys(msgVisible).forEach(k => delete msgVisible[k])
+        Object.keys(msgHeights).forEach(k => delete msgHeights[k])
+        await loadAndRender(activeConv.value, false)
+        initMsgVisibility()
+      } else {
+        const tag = agentTags.value.find(t => t.sessionId === sessionId)
+        if (tag && !tag.loaded) {
+          loadSubAgentBySessionId(sessionId, tag.discovered?.taskPreview || '')
+        } else if (tag && tag.loaded) {
+          currentSessionId.value = sessionId
+          displayCount.value = batchSize
+          Object.keys(msgVisible).forEach(k => delete msgVisible[k])
+          Object.keys(msgHeights).forEach(k => delete msgHeights[k])
+          const target = agentChain.value.find(a => a.sessionId === sessionId)
+          if (target) {
+            await loadAndRender(target, true)
+            initMsgVisibility()
+          }
+        }
+      }
+    }
+
+    /* ========== Computed ========== */
+    const filteredProjects = computed(() => {
+      if (!searchQuery.value) {
+        // 按 projectName 分组
+        const groups = {}
+        conversations.value.forEach(c => {
+          const pn = c.projectName || '(未命名)'
+          if (!groups[pn]) groups[pn] = []
+          groups[pn].push(c)
+        })
+        return Object.entries(groups).map(([name, convs]) => ({
+          key: name, projectName: name, convs
+        }))
+      }
+
+      const q = searchQuery.value.toLowerCase()
+      const filtered = conversations.value.filter(c => c.title.toLowerCase().includes(q))
+      const groups = {}
+      filtered.forEach(c => {
+        const pn = c.projectName || '(未命名)'
+        if (!groups[pn]) groups[pn] = []
+        groups[pn].push(c)
+      })
+      return Object.entries(groups).map(([name, convs]) => ({
+        key: name, projectName: name, convs
+      }))
+    })
+
+    const renderedMessages = computed(() => {
+      const nodes = activeConvData.value?.nodes || []
+      if (nodes.length <= displayCount.value) return nodes
+      return nodes.slice(nodes.length - displayCount.value)
+    })
+
+    const agentTags = computed(() => {
+      const tags = []
+      if (!activeConv.value) return tags
+      tags.push({ sessionId: activeConv.value.sessionId, label: '主对话', loaded: true })
+      const loadedMap = {}
+      agentChain.value.forEach(a => { loadedMap[a.sessionId] = a })
+      mainDiscoveredSubs.value.forEach(ds => {
+        if (loadedMap[ds.sessionId]) {
+          tags.push({ sessionId: ds.sessionId, label: loadedMap[ds.sessionId].label, loaded: true })
+        } else {
+          tags.push({
+            sessionId: ds.sessionId,
+            label: `${ds.sessionId.slice(0, 16)} — ${(ds.taskPreview || '').slice(0, 20)}`,
+            loaded: false,
+            discovered: ds,
+          })
+        }
+      })
+      return tags
+    })
+
+    function renderMarkdown(text) {
+      if (!text) return ''
+      let html = text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/@image#\d+:\S+(\.png|\.jpg|\.jpeg|\.gif|\.webp)?/gi, '<span class="text-gray-400 text-xs">[图片]</span>')
+        .replace(/@([\w./\\-]+)/g, '<code class="text-xs">@$1</code>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>')
+      return html
+    }
+
+    /* ========== 定时刷新 ========== */
+    function startAutoRefresh() {
+      stopAutoRefresh()
+      const ms = Math.max(1, refreshInterval.value || 5) * 1000
+      refreshTimer = setInterval(refreshCurrentView, ms)
+    }
+
+    function stopAutoRefresh() {
+      if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
+    }
+
+    function onMsgScroll() {
+      if (!msgContainer.value) return
+      const el = msgContainer.value
+      const threshold = scrollThreshold.value || 80
+      autoScroll.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold
+      if (el.scrollTop < 180 && !isLoadingMore.value && !loadMoreTimer) {
+        loadMoreTimer = setTimeout(() => {
+          loadMoreTimer = null
+          loadMoreMessages()
+        }, 300)
+      }
+    }
+
+    function loadMoreMessages() {
+      const nodes = activeConvData.value?.nodes || []
+      if (displayCount.value >= nodes.length) return
+      if (isLoadingMore.value) return
+      isLoadingMore.value = true
+      const el = msgContainer.value
+      const oldScrollHeight = el ? el.scrollHeight : 0
+      displayCount.value = Math.min(displayCount.value + batchSize, nodes.length)
+      nextTick(() => {
+        requestAnimationFrame(() => {
+          if (el) {
+            const newScrollHeight = el.scrollHeight
+            el.scrollTop = (el.scrollTop || 0) + (newScrollHeight - oldScrollHeight)
+          }
+          const allNodes = activeConvData.value?.nodes || []
+          allNodes.forEach(n => { if (!(n.id in msgVisible)) msgVisible[n.id] = true })
+          isLoadingMore.value = false
+        })
+      })
+    }
+
+    /* ========== 可见性优化 ========== */
+    function setupMsgObserver() {
+      destroyMsgObserver()
+      if (!msgContainer.value) return
+      msgObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          const id = entry.target.dataset.msgId
+          if (!id) return
+          if (entry.isIntersecting) {
+            msgVisible[id] = true
+            nextTick(() => {
+              requestAnimationFrame(() => {
+                const el = entry.target
+                if (el && msgVisible[id]) {
+                  const h = el.getBoundingClientRect().height
+                  if (h > 0) msgHeights[id] = h
+                  el.style.height = ''
+                }
+              })
+            })
+          } else {
+            const h = entry.target.getBoundingClientRect().height
+            if (h > 0) msgHeights[id] = h
+            msgVisible[id] = false
+            entry.target.style.height = (msgHeights[id] || 80) + 'px'
+          }
+        })
+      }, {
+        root: msgContainer.value,
+        rootMargin: '400px 0px 400px 0px',
+      })
+      observerInitialized.value = true
+    }
+
+    function destroyMsgObserver() {
+      if (msgObserver) { msgObserver.disconnect(); msgObserver = null }
+      observerInitialized.value = false
+    }
+
+    function observeMsg(id, el) {
+      if (!el || !msgObserver) return
+      if (el.dataset.msgObserved) return
+      el.dataset.msgId = id
+      el.dataset.msgObserved = '1'
+      msgObserver.observe(el)
+    }
+
+    function scrollToBottom(force) {
+      if (!msgContainer.value) return
+      if (!autoScroll.value && !force) return
+      cancelAnimationFrame(scrollRaf)
+      scrollRaf = requestAnimationFrame(() => {
+        if (msgContainer.value) {
+          msgContainer.value.scrollTop = msgContainer.value.scrollHeight
+        }
+      })
+    }
+
+    function snapshotCollapsed(nodes) {
+      const map = {}
+      nodes.forEach(n => { if (n.type === 'tool_call') map[n.id] = n.collapsed })
+      return map
+    }
+
+    function restoreCollapsed(nodes, map) {
+      nodes.forEach(n => {
+        if (n.type === 'tool_call' && map[n.id] !== undefined) n.collapsed = map[n.id]
+      })
+    }
+
+    async function refreshCurrentView() {
+      if (!activeConv.value) return
+      const collapsedMap = snapshotCollapsed(activeConvData.value?.nodes || [])
+      if (currentSessionId.value === activeConv.value.sessionId) {
+        await loadAndRender(activeConv.value, false, true)
+      } else {
+        const agent = agentChain.value.find(a => a.sessionId === currentSessionId.value)
+        if (agent) await loadAndRender(agent, true, true)
+      }
+      const nodes = activeConvData.value?.nodes || []
+      nodes.forEach(n => { if (!(n.id in msgVisible)) msgVisible[n.id] = true })
+      await nextTick()
+      restoreCollapsed(activeConvData.value?.nodes || [], collapsedMap)
+      setTimeout(() => scrollToBottom(), 300)
+    }
+
+    watch(autoRefresh, (val) => {
+      if (val) startAutoRefresh()
+      else stopAutoRefresh()
+    })
+
+    watch(refreshInterval, (val) => {
+      if (autoRefresh.value) startAutoRefresh()
+    })
+
+    /* ========== 工具函数 ========== */
+    function tryParse(line) {
+      try { return JSON.parse(line) } catch { return null }
+    }
+
+    function extractText(content) {
+      if (typeof content === 'string') {
+        // 提取 user_query
+        const qm = content.match(/<user_query>([\s\S]*?)<\/user_query>/s)
+        if (qm) return qm[1].trim()
+        return content
+      }
+      if (Array.isArray(content)) {
+        return content
+          .filter(b => b && typeof b === 'object')
+          .map(b => b.text || b.input_text || b.output_text || '')
+          .join('\n')
+      }
+      if (content && typeof content === 'object' && content.text) return content.text
+      return ''
+    }
+
+    /* ========== 初始化 ========== */
+    loadProjects()
+
+    onUnmounted(() => {
+      stopAutoRefresh()
+      cancelAnimationFrame(scrollRaf)
+      clearTimeout(loadMoreTimer)
+      destroyMsgObserver()
+    })
+
+    return {
+      projects, conversations, activeConv, activeConvData, agentChain,
+      currentSessionId, msgContainer, searchQuery, loading, totalConvs,
+      collapsedProjects, projectConvCache,
+      filteredProjects, renderedMessages, agentTags,
+      sidebarCollapsed, autoRefresh, refreshInterval, autoScroll, scrollThreshold, displayCount,
+      loadProjects, toggleProject, isProjectCollapsed,
+      selectConversation, jumpToSubAgent, switchToAgent,
+      renderMarkdown, onMsgScroll, observeMsg, msgVisible, msgHeights,
+    }
+  }
+}).mount('#app')
+</script>
+</body>
+</html>
