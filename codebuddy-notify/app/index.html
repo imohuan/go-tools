@@ -417,7 +417,7 @@
                   class="rounded-md bg-secondary-container/30 border border-outline-variant/40 overflow-hidden">
                   <div
                     class="flex items-center gap-2 px-3 md:px-4 py-2 md:py-2.5 cursor-pointer hover:bg-secondary-container/50 transition-colors"
-                    @click="node.collapsed = !node.collapsed">
+                    @click="toggleToolCollapse(node)">
                     <span
                       class="material-symbols-outlined text-on-secondary-container text-[16px] flex-shrink-0">handyman</span>
                     <span
@@ -535,6 +535,10 @@
         const displayCount = ref(50)
         const isLoadingMore = ref(false)
         const allToolsCollapsed = ref(false)
+        const toolCollapsedState = reactive({})  // {nodeId: boolean} 持久化工具折叠状态，刷新不丢失
+        const scrollLock = ref(false)            // 主动滚动期间锁住，onMsgScroll 不更新 isSnapped
+        const pendingScroll = ref(false)         // 有待处理的增量插入滚动
+        const snapBeforeInsert = ref(false)      // 增量插入前的吸附状态
         let loadMoreTimer = null
         const batchSize = 20
         let refreshTimer = null
@@ -675,6 +679,7 @@
           autoScroll.value = true
           displayCount.value = batchSize
           await loadAndRender(conv, false)
+          syncURL()
           if (autoRefresh.value) startAutoRefresh()
         }
 
@@ -753,32 +758,21 @@
               discoveredSubs.push({ sessionId: n.agentId, taskPreview: n.taskPreview })
             }
           })
+          // 设置滚动标志位（必须在 activeConvData 赋值之前，watch 同步触发）
+          if (isIncremental && wasSnapped) {
+            snapBeforeInsert.value = true
+            pendingScroll.value = true
+          }
+
           activeConvData.value = { nodes: allNodes, idMap, conv, text, discoveredSubs }
           if (!isSubAgent) mainDiscoveredSubs.value = discoveredSubs
 
-          // 渲染后滚动策略
-          // - 增量刷新：若 autoScroll 开启 且 刷新前处于吸附状态 → 带过渡滚动到底部（新数据无损插入）
-          // - 全量加载：若 autoScroll 开启 → 瞬间滚动到底部
-          // 双 nextTick + rAF 确保 Vue 渲染 + 布局完成后再滚动
-          nextTick(() => {
+          // 全量加载：若 autoScroll 开启 且 没有待处理的增量滚动 → 瞬间滚动到底部
+          if (!isIncremental && autoScroll.value && !pendingScroll.value) {
             nextTick(() => {
-              requestAnimationFrame(() => {
-                if (!msgContainer.value) return
-                if (isIncremental) {
-                  console.log('[滚动] 增量刷新检查:', { wasSnapped, autoScroll: autoScroll.value, scrollHeight: msgContainer.value.scrollHeight, scrollTop: msgContainer.value.scrollTop })
-                  if (autoScroll.value && wasSnapped) {
-                    console.log('[滚动] smooth scrollTo bottom — 先 capture wasSnapped=' + wasSnapped + ' → 现在数据已插入')
-                    msgContainer.value.scrollTo({ top: msgContainer.value.scrollHeight, behavior: 'smooth' })
-                  }
-                } else {
-                  if (autoScroll.value) {
-                    console.log('[滚动] 全量加载 scrollTop=scrollHeight:', msgContainer.value.scrollHeight)
-                    msgContainer.value.scrollTop = msgContainer.value.scrollHeight
-                  }
-                }
-              })
+              if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight
             })
-          })
+          }
         }
 
         function renderNode(d, nodes, depth) {
@@ -802,7 +796,7 @@
                 if (d.arguments) fnArgs = JSON.stringify(JSON.parse(d.arguments), null, 2)
                 else if (d.function?.arguments) fnArgs = JSON.stringify(JSON.parse(d.function.arguments), null, 2)
               } catch { fnArgs = d.arguments || '' }
-              nodes.push({ id: d.id, type: 'tool_call', fnName, fnArgs, depth, collapsed: false })
+              nodes.push({ id: d.id, type: 'tool_call', fnName, fnArgs, depth, collapsed: toolCollapsedState[d.id] ?? false })
               break
             case 'function_call_result':
               if (d.name === 'Agent') {
@@ -814,7 +808,8 @@
                 const last = nodes[nodes.length - 1]
                 if (last && last.type === 'tool_call') {
                   last.result = extractText(d.output?.text || d.content || '')
-                  last.collapsed = false
+                  // 首次加载时默认展开；若用户已手动折叠则保留偏好
+                  if (!(last.id in toolCollapsedState)) last.collapsed = false
                 }
               }
               break
@@ -833,15 +828,10 @@
           if (existing >= 0) { currentSessionId.value = sessionId; await loadAndRender(agentChain.value[existing], true); return }
           const mainConv = activeConv.value
           const projectName = mainConv._projectName || mainConv.projectName
-          let url = '/api/projects/' + encodeURIComponent(projectName) + '/conversations/' + mainConv.sessionId + '/subagents/' + sessionId
-          let res = await fetch(url)
-          let json = await res.json()
-          if (!json.success) {
-            const fallbackUrl = '/api/projects/' + encodeURIComponent(projectName) + '/conversations/' + mainConv.sessionId + '/subagents/agent-' + sessionId
-            res = await fetch(fallbackUrl)
-            json = await res.json()
-            if (!json.success) { alert('找不到子代理: ' + sessionId); return }
-          }
+          const url = '/api/projects/' + encodeURIComponent(projectName) + '/conversations/' + mainConv.sessionId + '/subagents/' + sessionId
+          const res = await fetch(url)
+          const json = await res.json()
+          if (!json.success) { alert('找不到子代理: ' + sessionId); return }
           const text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
           const newAgent = {
             sessionId,
@@ -853,6 +843,7 @@
           currentSessionId.value = sessionId
           displayCount.value = batchSize
           await loadAndRender(newAgent, true)
+          syncURL()
         }
 
         async function switchToAgent(sessionId) {
@@ -860,6 +851,7 @@
             currentSessionId.value = sessionId
             displayCount.value = batchSize
             await loadAndRender(activeConv.value, false)
+            syncURL()
           } else {
             const tag = agentTags.value.find(t => t.sessionId === sessionId)
             if (tag && !tag.loaded) loadSubAgentBySessionId(sessionId, tag.discovered?.taskPreview || '')
@@ -867,7 +859,7 @@
               currentSessionId.value = sessionId
               displayCount.value = batchSize
               const target = agentChain.value.find(a => a.sessionId === sessionId)
-              if (target) { await loadAndRender(target, true) }
+              if (target) { await loadAndRender(target, true); syncURL() }
             }
           }
         }
@@ -955,35 +947,83 @@
 
         function startAutoRefresh() {
           stopAutoRefresh()
-          if (!autoRefresh.value || !activeConv.value) return
           const ms = Math.max(1, refreshInterval.value || 5) * 1000
           refreshTimer = setInterval(refreshActiveConversation, ms)
         }
         function stopAutoRefresh() { if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null } }
 
         async function refreshActiveConversation() {
+          // 兼容：没有打开的对话时跳过
           if (!activeConv.value) return
-          const projectName = activeConv.value.projectName || activeConv.value._projectName
-          if (!projectName) return
 
-          console.log('[刷新] refreshActiveConversation 开始, isSnapped=' + isSnapped.value + ', autoScroll=' + autoScroll.value)
-
-          // 第一步：获取项目下更新的对话列表（增量）
-          const ts = projectTimestamps[projectName] || 0
-          await refreshProjectConvs(projectName, ts, true)
-          console.log('[刷新] refreshProjectConvs 完成, conversations 条数=' + conversations.value.length)
-
-          // 第二步：刷新当前对话详情（增量，如果已加载过则带 since；首次则全量）
-          if (activeConv.value._lastTs) {
-            await loadAndRender(activeConv.value, false, true)
-          } else {
-            // 首次刷新：全量加载（同时会设置 _lastTs）
-            await loadAndRender(activeConv.value, false, false)
+          // 第一件事：刷新所有已展开项目的侧边栏列表
+          for (const name of expandedProjects.value) {
+            const ts = projectTimestamps[name] || 0
+            await refreshProjectConvs(name, ts, true)
           }
+          console.log('[刷新] 侧边栏刷新完成')
+
+          // 第二件事：刷新当前打开的内容（主对话 或 子代理）
+          if (currentSessionId.value === activeConv.value?.sessionId) {
+            // 正在看主对话
+            if (activeConv.value._lastTs) {
+              await loadAndRender(activeConv.value, false, true)
+            } else {
+              await loadAndRender(activeConv.value, false, false)
+            }
+          } else {
+            // 正在看子代理 — 重新拉取子代理全量数据
+            const agent = agentChain.value.find(a => a.sessionId === currentSessionId.value)
+            if (agent) {
+              console.log('[刷新] 刷新子代理:', currentSessionId.value)
+              await refreshSubAgentData(agent)
+            }
+          }
+        }
+
+        // 重新拉取子代理全量数据
+        async function refreshSubAgentData(agent) {
+          if (!activeConv.value) return
+          const mainConv = activeConv.value
+          const projectName = mainConv._projectName || mainConv.projectName
+          const url = '/api/projects/' + encodeURIComponent(projectName) + '/conversations/' + mainConv.sessionId + '/subagents/' + agent.sessionId
+          try {
+            const res = await fetch(url)
+            const json = await res.json()
+            if (!json.success) return
+            const text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
+            // 捕获吸附状态（子代理也走增量插入逻辑）
+            const wasSnapped = isSnapped.value
+            if (wasSnapped) {
+              snapBeforeInsert.value = true
+              pendingScroll.value = true
+            }
+            agent._cachedContent = text
+            await loadAndRender(agent, true)
+          } catch (e) {
+            console.error('[刷新] 子代理刷新失败:', e)
+          }
+        }
+
+        /* ===== URL 状态同步 ===== */
+        function syncURL() {
+          const params = new URLSearchParams()
+          if (activeConv.value) {
+            const proj = activeConv.value._projectName || activeConv.value.projectName
+            if (proj) params.set('project', proj)
+            params.set('conv_id', activeConv.value.sessionId)
+            if (currentSessionId.value && currentSessionId.value !== activeConv.value.sessionId) {
+              params.set('agent_id', currentSessionId.value)
+            }
+          }
+          const qs = params.toString()
+          history.replaceState(null, '', qs ? ('?' + qs) : window.location.pathname)
         }
 
         function onMsgScroll() {
           if (!msgContainer.value) return
+          // 主动滚动锁期间不更新 isSnapped，防止 smooth 动画中途误判
+          if (scrollLock.value) return
           const el = msgContainer.value
           const dist = el.scrollHeight - el.scrollTop - el.clientHeight
           const prevSnapped = isSnapped.value
@@ -1006,98 +1046,76 @@
           msgContainer.value.scrollTo({ top: msgContainer.value.scrollHeight, behavior: 'smooth' })
         }
 
+        /* ===== 核心：无感追加消息并自动滚动 ===== */
+        // rawLines: 原始 JSON 行数组（追加到 conv._cachedContent）
+        // renderNodes: 对应的渲染节点数组（直接追加到 activeConvData.nodes 末尾）
+        function appendNodesAndScroll(rawLines, renderNodes) {
+          if (!activeConv.value || !activeConvData.value) return false
+
+          const conv = activeConv.value
+          const wasSnapped = isSnapped.value
+          const existingNodes = activeConvData.value.nodes || []
+
+          // 追加 raw 数据到缓存
+          if (rawLines.length > 0) {
+            conv._cachedContent = (conv._cachedContent || '') + '\n' + rawLines.join('\n')
+          }
+
+          // 追加渲染节点到末尾
+          const allNodes = [...existingNodes, ...renderNodes]
+          displayCount.value = Math.max(displayCount.value, allNodes.length)
+
+          // 设置标志位，由 watch 统一触发滚动
+          if (wasSnapped) {
+            snapBeforeInsert.value = wasSnapped
+            pendingScroll.value = true
+          }
+
+          // 更新渲染数据（触发 watch → 统一处理滚动）
+          activeConvData.value = {
+            nodes: allNodes,
+            idMap: activeConvData.value.idMap || {},
+            conv,
+            text: conv._cachedContent,
+            discoveredSubs: activeConvData.value.discoveredSubs || []
+          }
+
+          console.log('[appendNodesAndScroll] ' + existingNodes.length + ' → ' + allNodes.length + ' nodes, wasSnapped=' + wasSnapped + ', pending=' + pendingScroll.value)
+
+          return wasSnapped
+        }
+
         /* ===== 调试：模拟无感插入数据 ===== */
         function debugInsertData() {
           console.log('[调试] ========== 按钮点击 ==========')
-          console.log('[调试] activeConv:', activeConv.value ? activeConv.value.sessionId : 'null')
-          console.log('[调试] activeConvData:', activeConvData.value ? (activeConvData.value.nodes || []).length + ' nodes' : 'null')
-          console.log('[调试] isSnapped:', isSnapped.value, 'autoScroll:', autoScroll.value, 'scrollThreshold:', scrollThreshold.value, 'displayCount:', displayCount.value)
+          if (!activeConv.value) { alert('调试：没有选中的对话'); return }
+          if (!activeConvData.value) { alert('调试：对话数据未加载'); return }
 
-          if (!activeConv.value) {
-            console.warn('[调试] ❌ 无活跃对话，忽略')
-            alert('调试：没有选中的对话，请先在左侧选择一个对话')
-            return
-          }
-          if (!activeConvData.value) {
-            console.warn('[调试] ❌ 无渲染数据，忽略')
-            alert('调试：对话数据未加载，请等待加载完成')
-            return
+          function randomChinese(len) {
+            const base = 0x4e00, range = 0x9fa5 - 0x4e00
+            let s = ''
+            for (let i = 0; i < len; i++) s += String.fromCodePoint(base + Math.floor(Math.random() * range))
+            return s
           }
 
-          try {
           const ts = Date.now()
           const seq = Math.floor(Math.random() * 1000)
-          // 每次插入 3 组对话（6 条），带明显标记
-          const fakeLines = []
+          const rawAppend = [], fakeNodes = []
+
           for (let k = 0; k < 3; k++) {
             const uid = 'debug-' + ts + '-' + seq + '-u' + k
             const aid = 'debug-' + ts + '-' + seq + '-a' + k
-            fakeLines.push(
-              JSON.stringify({ id: uid, type: 'message', role: 'user', content: '<user_query>🔧【调试插入 #' + (k+1) + '】' + new Date().toLocaleTimeString() + ' — 测试无感刷新</user_query>', timestamp: ts + k * 10 }),
-              JSON.stringify({ id: aid, type: 'message', role: 'assistant', parentId: uid, content: '✅ 调试回复 #' + (k+1) + '：isSnapped=' + isSnapped.value + ' autoScroll=' + autoScroll.value, timestamp: ts + k * 10 + 1 }),
+            const userText = '🔧【调试插入 #' + (k+1) + '】' + new Date().toLocaleTimeString() + '\n' + randomChinese(100)
+            const assistantText = '✅ 调试回复 #' + (k+1) + '：' + randomChinese(80)
+            rawAppend.push(
+              JSON.stringify({ id: uid, type: 'message', role: 'user', content: '<user_query>' + userText + '</user_query>', timestamp: ts + k * 10 }),
+              JSON.stringify({ id: aid, type: 'message', role: 'assistant', parentId: uid, content: assistantText, timestamp: ts + k * 10 + 1 }),
             )
-          }
-          const newText = fakeLines.join('\n')
-
-          console.log('[调试] 模拟插入 ' + fakeLines.length + ' 条消息')
-
-          // 捕获吸附状态
-          const wasSnapped = isSnapped.value
-
-          // 数据插入：追加到缓存
-          const conv = activeConv.value
-          conv._cachedContent = (conv._cachedContent || '') + '\n' + newText
-
-          // 重新解析全部节点
-          const rawLines = conv._cachedContent.trim().split('\n')
-          const parsedLines = [], idMap = {}, childrenMap = {}, skipTypes = new Set(['file-history-snapshot', 'reasoning'])
-          for (let i = 0; i < rawLines.length; i++) {
-            try { var d = JSON.parse(rawLines[i]) } catch (e) { continue }
-            if (!d || !d.id || skipTypes.has(d.type)) continue
-            parsedLines.push(d)
-            idMap[d.id] = d
-            const pid = d.parentId || '__root__'
-            if (!childrenMap[pid]) childrenMap[pid] = []
-            childrenMap[pid].push(d)
+            fakeNodes.push({ id: uid, type: 'user', text: userText, depth: 0 })
+            fakeNodes.push({ id: aid, type: 'assistant', text: assistantText, depth: 0 })
           }
 
-          const allNodes = [], visited = new Set()
-          function dfs(id) {
-            const d = idMap[id]
-            if (!d || visited.has(id)) return
-            visited.add(id)
-            renderNode(d, allNodes, 0)
-            const children = childrenMap[id]
-            if (children) children.forEach(child => dfs(child.id))
-          }
-          const roots = childrenMap['__root__'] || []
-          roots.forEach(d => dfs(d.id))
-          for (const d of parsedLines) { if (visited.has(d.id)) continue; dfs(d.id) }
-
-          // 关键：expand displayCount 确保新数据可见，不被 slice 截掉
-          displayCount.value = Math.max(displayCount.value, allNodes.length)
-          console.log('[调试] displayCount 已扩大至:', displayCount.value, '(nodes=' + allNodes.length + ')')
-
-          // 更新渲染数据
-          activeConvData.value = { nodes: allNodes, idMap, conv, text: conv._cachedContent, discoveredSubs: activeConvData.value.discoveredSubs || [] }
-
-          console.log('[调试] 数据插入完成, 总 nodes=' + allNodes.length + ', wasSnapped=' + wasSnapped)
-
-          // 双 nextTick + rAF 后强制滚到底部
-          nextTick(() => {
-            nextTick(() => {
-              requestAnimationFrame(() => {
-                if (!msgContainer.value) return
-                const el = msgContainer.value
-                console.log('[调试] 强制 scrollTo bottom, scrollHeight=' + el.scrollHeight)
-                el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-              })
-            })
-          })
-          } catch (e) {
-            console.error('[调试] 异常:', e)
-            alert('调试异常: ' + (e.message || e))
-          }
+          appendNodesAndScroll(rawAppend, fakeNodes)
         }
 
         function loadMoreMessages() {
@@ -1118,22 +1136,22 @@
           })
         }
 
-        function snapshotCollapsed(nodes) {
-          const map = {}
-          nodes.forEach(n => { if (n.type === 'tool_call') map[n.id] = n.collapsed })
-          return map
-        }
-        function restoreCollapsed(nodes, map) {
-          nodes.forEach(n => { if (n.type === 'tool_call' && map[n.id] !== undefined) n.collapsed = map[n.id] })
-        }
-
         function toggleAllTools() {
           const nodes = activeConvData.value?.nodes || []
           if (nodes.length === 0) return
           allToolsCollapsed.value = !allToolsCollapsed.value
           nodes.forEach(n => {
-            if (n.type === 'tool_call') n.collapsed = allToolsCollapsed.value
+            if (n.type === 'tool_call') {
+              n.collapsed = allToolsCollapsed.value
+              toolCollapsedState[n.id] = allToolsCollapsed.value
+            }
           })
+        }
+
+        // 切换单个工具折叠，同步持久化
+        function toggleToolCollapse(node) {
+          node.collapsed = !node.collapsed
+          toolCollapsedState[node.id] = node.collapsed
         }
 
         function formatToolArgs(args) {
@@ -1174,18 +1192,16 @@
         async function refreshCurrentView() {
           if (!activeConv.value) return
           console.log('[refreshCurrentView] 触发, isSnapped=' + isSnapped.value + ', autoScroll=' + autoScroll.value)
-          const collapsedMap = snapshotCollapsed(activeConvData.value?.nodes || [])
           const wasSnapped = isSnapped.value
           if (currentSessionId.value === activeConv.value.sessionId) {
             await loadAndRender(activeConv.value, false, true)
           } else {
+            // 子代理：重新拉取全量数据
             const agent = agentChain.value.find(a => a.sessionId === currentSessionId.value)
-            if (agent) await loadAndRender(agent, true, true)
+            if (agent) await refreshSubAgentData(agent)
           }
-          const nodes = activeConvData.value?.nodes || []
+          // toolCollapsedState 已全局持久化，无需 snapshot/restore
           await nextTick()
-          restoreCollapsed(activeConvData.value?.nodes || [], collapsedMap)
-          // 若 autoScroll 开启且刷新前处于吸附状态 → 带过渡滚动到底部
           if (autoScroll.value && wasSnapped && msgContainer.value) {
             setTimeout(() => {
               if (msgContainer.value) {
@@ -1198,13 +1214,83 @@
         watch(autoRefresh, v => v ? startAutoRefresh() : stopAutoRefresh())
         watch(refreshInterval, () => { if (autoRefresh.value) startAutoRefresh() })
 
+        // 统一监听 nodes 长度变化处理增量滚动（调试插入 & 定时刷新共用）
+        watch(() => activeConvData.value?.nodes?.length, (len, oldLen) => {
+          if (!pendingScroll.value || !len || len === oldLen) return
+          pendingScroll.value = false
+          if (!autoScroll.value || !snapBeforeInsert.value) {
+            snapBeforeInsert.value = false
+            return
+          }
+          snapBeforeInsert.value = false
+
+          scrollLock.value = true
+
+          // nextTick 等 Vue 渲染 → setTimeout 等浏览器完成布局 → smooth 滚动 → 二次确认
+          nextTick(() => {
+            setTimeout(() => {
+              if (!msgContainer.value) return
+              const el = msgContainer.value
+              el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+              // smooth 动画后二次确认滚到底（防止 scrollHeight 滞后导致差几像素）
+              setTimeout(() => {
+                if (el.scrollTop + el.clientHeight < el.scrollHeight - 2) {
+                  el.scrollTop = el.scrollHeight
+                }
+                scrollLock.value = false
+                isSnapped.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < scrollThreshold.value
+              }, 500)
+            }, 100)
+          })
+        })
+
         /* ===== 工具 ===== */
 
         function tryParse(line) { try { return JSON.parse(line) } catch { return null } }
 
         /* ===== 初始化 ===== */
 
+        // 页面加载：从 URL 恢复状态
+        async function restoreFromURL() {
+          const params = new URLSearchParams(window.location.search)
+          const proj = params.get('project')
+          const convId = params.get('conv_id')
+          const agentId = params.get('agent_id')
+          if (!proj || !convId) return
+
+          // 等待项目列表加载
+          // loadProjects 是同步启动但异步完成
+          // 简单延迟确保数据就绪
+          await new Promise(r => setTimeout(r, 300))
+
+          // 1. 展开项目
+          const alreadyExpanded = projectConvCache[proj]
+          if (!alreadyExpanded) {
+            await refreshProjectConvs(proj, 0, false)
+          }
+          expandedProjects.value = new Set([...expandedProjects.value, proj])
+
+          // 2. 找到对话
+          await new Promise(r => setTimeout(r, 200))
+          const convs = projectConvCache[proj] || []
+          const conv = convs.find(c => c.sessionId === convId)
+          if (!conv) return
+
+          await selectConversation(conv)
+
+          // 3. 如果有 agent_id，加载子代理
+          if (agentId && activeConvData.value) {
+            // 等 discoverSubs 加载
+            await new Promise(r => setTimeout(r, 500))
+            const tag = agentTags.value.find(t => t.sessionId === agentId)
+            if (tag) {
+              await loadSubAgentBySessionId(agentId, tag.discovered?.taskPreview || '')
+            }
+          }
+        }
+
         loadProjects()
+        restoreFromURL()
         if (window.innerWidth < 768) sidebarCollapsed.value = true
 
         onUnmounted(() => {
@@ -1222,7 +1308,7 @@
           loadProjects, toggleProject, isProjectCollapsed,
           selectConversation, jumpToSubAgent, switchToAgent,
           renderMarkdown, onMsgScroll,
-          refreshCurrentView, toggleAllTools, formatToolArgs, scrollToTop, scrollToBottom,
+          refreshCurrentView, toggleAllTools, toggleToolCollapse, formatToolArgs, scrollToTop, scrollToBottom,
           debugInsertData,
         }
       }

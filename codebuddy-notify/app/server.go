@@ -334,16 +334,42 @@ func (s *Server) getSubAgent(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("session")
 	agentID := r.PathValue("agent")
 
-	filePath := filepath.Join(s.projectsDir, projectName, sessionID, "subagents", agentID+".jsonl")
+	subDir := filepath.Join(s.projectsDir, projectName, sessionID, "subagents")
 
-	// 兼容 agent- 前缀
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		filePath = filepath.Join(s.projectsDir, projectName, sessionID, "subagents", "agent-"+agentID+".jsonl")
+	// 尝试多种文件名模式
+	candidates := []string{
+		filepath.Join(subDir, agentID+".jsonl"),          // 精确匹配
+		filepath.Join(subDir, "agent-"+agentID+".jsonl"),  // agent- 前缀
 	}
+
+	var filePath string
+	for _, fp := range candidates {
+		if _, err := os.Stat(fp); err == nil {
+			filePath = fp
+			break
+		}
+	}
+
+	// 兜底：glob 模糊匹配（处理 sessionId 变化等情况）
+	if filePath == "" {
+		pattern := filepath.Join(subDir, "*"+agentID+"*.jsonl")
+		matches, _ := filepath.Glob(pattern)
+		if len(matches) > 0 {
+			filePath = matches[0]
+		}
+	}
+
+	if filePath == "" {
+		log.Printf("[getSubAgent] NOT FOUND project=%s session=%s agent=%s dir=%s", projectName, sessionID, agentID, subDir)
+		writeJSON(w, http.StatusNotFound, APIResponse{Error: fmt.Sprintf("子代理文件不存在: %s/%s", sessionID, agentID)})
+		return
+	}
+
+	log.Printf("[getSubAgent] found: %s", filePath)
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, APIResponse{Error: "子代理文件不存在"})
+		writeJSON(w, http.StatusNotFound, APIResponse{Error: "子代理文件读取失败"})
 		return
 	}
 
