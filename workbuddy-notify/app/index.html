@@ -181,7 +181,7 @@
         <!-- 工具折叠/展开 -->
         <button @click="toggleAllTools"
           class="flex items-center gap-1 text-body-sm text-on-surface-variant hover:text-on-surface px-1.5 py-1 rounded-md hover:bg-surface-container-high transition-colors select-none"
-          title="折叠/展开全部工具">
+          title="折叠/展开全部工具和推理">
           <span class="material-symbols-outlined text-[14px]">{{ allToolsCollapsed ? 'unfold_more' : 'unfold_less'
             }}</span>
         </button>
@@ -359,6 +359,13 @@
               {{ activeConv.title }}
             </span>
 
+            <!-- 复制文件路径按钮 -->
+            <button v-if="activeConv.filePath" @click="copyFilePath(activeConv.filePath)"
+              class="w-7 h-7 flex items-center justify-center rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors flex-shrink-0"
+              title="复制文件路径">
+              <span class="material-symbols-outlined text-[16px]">{{ copyDone ? 'check' : 'content_copy' }}</span>
+            </button>
+
             <!-- 移动端刷新按钮 -->
             <button @click="refreshCurrentView()"
               class="md:hidden p-1.5 rounded-full hover:bg-surface-container-high flex-shrink-0">
@@ -394,7 +401,7 @@
                 <span class="material-symbols-outlined text-on-surface-variant text-[16px]">keyboard_arrow_down</span>
               </button>
             </div>
-            <template v-for="node in renderedMessages" :key="node.id">
+            <template v-for="node in renderedMessages" :key="node._key || node.id">
               <div class="msg-wrapper overflow-hidden flex-shrink-0"
                 style="content-visibility:auto;contain-intrinsic-size:auto 40px">
 
@@ -409,6 +416,21 @@
                 <div v-else-if="node.type === 'assistant'" class="flex justify-start">
                   <div
                     class="max-w-[90%] md:max-w-[80%] px-3 md:px-4 py-2 md:py-2.5 rounded-xl bg-surface border border-outline-variant/30 text-body-md md:text-body-md text-on-surface msg-content"
+                    v-html="renderMarkdown(node.text)"></div>
+                </div>
+
+                <!-- AI 推理过程（reasoning） — 灰色斜体，小字，可折叠 -->
+                <div v-else-if="node.type === 'reasoning'"
+                  class="rounded-md bg-surface-container-low border border-outline-variant/30 overflow-hidden">
+                  <div @click="node.collapsed = !node.collapsed"
+                    class="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer hover:bg-surface-container-high transition-colors select-none">
+                    <span class="material-symbols-outlined text-outline text-[14px]">psychology</span>
+                    <span class="text-label-md text-on-surface-variant">AI 推理过程</span>
+                    <span class="text-body-sm text-outline ml-auto">{{ (node.text || '').length }} 字</span>
+                    <span class="material-symbols-outlined text-on-surface-variant text-[14px] transition-transform"
+                      :class="node.collapsed ? '' : 'rotate-180'">expand_more</span>
+                  </div>
+                  <div v-show="!node.collapsed" class="px-3 py-2 border-t border-outline-variant/30 text-body-sm text-on-surface-variant whitespace-pre-wrap max-h-[300px] overflow-y-auto font-mono leading-relaxed"
                     v-html="renderMarkdown(node.text)"></div>
                 </div>
 
@@ -529,6 +551,8 @@
 
         const autoRefresh = ref(true)
         const debugMode = ref((new URLSearchParams(window.location.search)).get('debug') === 'true')
+        const copyDone = ref(false)
+        let copyTimer = null
         const refreshInterval = ref(5)
         const autoScroll = ref(true)
         const scrollThreshold = ref(80)
@@ -555,10 +579,10 @@
               projects.value = json.data || []
               totalConvs.value = projects.value.reduce((sum, p) => sum + (p.conv_count || 0), 0)
 
-              // 默认展开第一个项目
+              // 默认展开第一个项目（不覆盖已展开的项目）
               if (projects.value.length > 0) {
                 const first = projects.value[0].name
-                const s = new Set()
+                const s = new Set(expandedProjects.value)
                 s.add(first)
                 expandedProjects.value = s
                 await expandProject(first)
@@ -571,9 +595,9 @@
         }
 
         async function expandProject(name) {
-          // 如果已展开且有缓存，只做增量刷新
           const ts = projectTimestamps[name] || 0
-          await refreshProjectConvs(name, ts, false)
+          // 有 ts 说明之前加载过 → 走增量；否则全量
+          await refreshProjectConvs(name, ts, ts > 0)
           // 标记为展开
           const s = new Set(expandedProjects.value)
           s.add(name)
@@ -598,6 +622,7 @@
               timestamp: c.timestamp,
               projectName: c.project_name || name,
               status: c.status || '',
+              filePath: c.file_path || '',
             }))
 
             if (isIncremental && newConvs.length > 0) {
@@ -723,34 +748,35 @@
           const rawLines = text.trim().split('\n')
           const parsedLines = []
           const idMap = {}
-          const childrenMap = {}
-          const skipTypes = new Set(['file-history-snapshot', 'reasoning'])
+          const skipTypes = new Set(['file-history-snapshot'])  // reasoning 现在支持显示
 
           for (let i = 0; i < rawLines.length; i++) {
             const d = tryParse(rawLines[i])
             if (!d || !d.id || skipTypes.has(d.type)) continue
+            d._key = (d.id || d.type || 'row') + ':' + i
             parsedLines.push(d)
-            idMap[d.id] = d
-            const pid = d.parentId || '__root__'
-            if (!childrenMap[pid]) childrenMap[pid] = []
-            childrenMap[pid].push(d)
+            if (d.id && !idMap[d.id]) idMap[d.id] = d
           }
 
           const allNodes = []
-          const visited = new Set()
-          function dfs(id) {
-            const d = idMap[id]
-            if (!d || visited.has(id)) return
-            visited.add(id)
-            renderNode(d, allNodes, 0)
-            const children = childrenMap[id]
-            if (children) children.forEach(child => dfs(child.id))
-          }
-          const roots = childrenMap['__root__'] || []
-          roots.forEach(d => dfs(d.id))
           for (const d of parsedLines) {
-            if (visited.has(d.id)) continue
-            dfs(d.id)
+            renderNode(d, allNodes, 0)
+          }
+
+          console.log('[loadAndRender] 解析完成: rawLines=' + rawLines.length + ' parsed=' + parsedLines.length + ' nodes=' + allNodes.length)
+          // 诊断：列出所有 node 类型统计
+          const typeCount = {}
+          allNodes.forEach(n => { typeCount[n.type] = (typeCount[n.type] || 0) + 1 })
+          console.log('[loadAndRender] nodes 类型分布:', JSON.stringify(typeCount))
+          // 搜索特定 ID
+          if (!allNodes.find(n => n.id === 'c3e09d1c-4cb9-4ef9-8c06-c15043d1dbe6')) {
+            const inParsed = parsedLines.find(d => d.id === 'c3e09d1c-4cb9-4ef9-8c06-c15043d1dbe6')
+            if (inParsed) {
+              const extracted = extractText(inParsed.content)
+              console.warn('[loadAndRender] c3e09d1c 在 parsedLines 中但不在 nodes 中!', { type: inParsed.type, role: inParsed.role, contentLen: JSON.stringify(inParsed.content).length, extractedLen: extracted.length, extractedPreview: extracted.slice(0, 100) })
+            } else {
+              console.warn('[loadAndRender] c3e09d1c 不在 parsedLines 中')
+            }
           }
 
           const discoveredSubs = []
@@ -798,45 +824,51 @@
         }
 
         function renderNode(d, nodes, depth) {
+          const key = d._key || d.id || (d.type + '-' + nodes.length)
           switch (d.type) {
-            case 'message':
-              if (d.role === 'user') {
-                const raw = extractText(d.content)
-                const qm = raw.match(/<user_query>([\s\S]*?)<\/user_query>/s)
-                const text = qm ? qm[1].trim() : raw
-                if (text) nodes.push({ id: d.id, type: 'user', text, depth })
-              } else if (d.role === 'assistant') {
-                const text = extractText(d.content)
-                if (text) nodes.push({ id: d.id, type: 'assistant', text, depth })
-              }
+            case 'reasoning':
+              nodes.push({ id: d.id, _key: key, type: 'reasoning', text: extractText(d.rawContent || d.content), depth })
               break
             case 'function_call':
+              // providerData.reasoning 只是工具调用的上下文，真正推理在独立 reasoning 行里。
               if (!d.name && !d.function) break
               const fnName = d.name || d.function?.name || '?'
+              const stateKey = d.callId || d.id || key
               let fnArgs = ''
               try {
                 if (d.arguments) fnArgs = JSON.stringify(JSON.parse(d.arguments), null, 2)
                 else if (d.function?.arguments) fnArgs = JSON.stringify(JSON.parse(d.function.arguments), null, 2)
               } catch { fnArgs = d.arguments || '' }
-              nodes.push({ id: d.id, type: 'tool_call', fnName, fnArgs, depth, collapsed: toolCollapsedState[d.id] ?? false })
+              nodes.push({ id: d.id, _key: key, stateKey, type: 'tool_call', fnName, fnArgs, depth, collapsed: toolCollapsedState[stateKey] ?? false })
+              break
+            case 'message':
+              if (d.role === 'user') {
+                const raw = extractText(d.content)
+                const qm = raw.match(/<user_query>([\s\S]*?)<\/user_query>/s)
+                const text = qm ? qm[1].trim() : raw
+                if (text) nodes.push({ id: d.id, _key: key, type: 'user', text, depth })
+              } else if (d.role === 'assistant') {
+                const text = extractText(d.content)
+                if (text) nodes.push({ id: d.id, _key: key, type: 'assistant', text, depth })
+              }
               break
             case 'function_call_result':
               if (d.name === 'Agent') {
                 const sa = d.providerData?.toolResult?.subAgent
                 const agentId = sa?.sessionId || d.callId || '?'
                 const taskPreview = extractText(d.output?.text || '').slice(0, 60)
-                nodes.push({ id: d.id, type: 'subagent', agentId, taskPreview, depth })
+                nodes.push({ id: d.id, _key: key, type: 'subagent', agentId, taskPreview, depth })
               } else {
                 const last = nodes[nodes.length - 1]
                 if (last && last.type === 'tool_call') {
                   last.result = extractText(d.output?.text || d.content || '')
                   // 首次加载时默认展开；若用户已手动折叠则保留偏好
-                  if (!(last.id in toolCollapsedState)) last.collapsed = false
+                  if (!((last.stateKey || last.id) in toolCollapsedState)) last.collapsed = false
                 }
               }
               break
-            case 'reasoning': case 'file-history-snapshot': break
-            default: nodes.push({ id: d.id, type: 'system', text: `[${d.type}]`, depth })
+            case 'file-history-snapshot': break
+            default: nodes.push({ id: d.id, _key: key, type: 'system', text: `[${d.type}]`, depth })
           }
         }
 
@@ -962,8 +994,19 @@
             const qm = content.match(/<user_query>([\s\S]*?)<\/user_query>/s)
             return qm ? qm[1].trim() : content
           }
-          if (Array.isArray(content)) return content.filter(b => b && typeof b === 'object').map(b => b.text || b.input_text || b.output_text || '').join('\n')
+          if (Array.isArray(content)) {
+            const parts = content.filter(b => b && typeof b === 'object').map(b => {
+              if (b.text) return b.text
+              if (b.input_text) return b.input_text
+              if (b.output_text) return b.output_text
+              if (b.type === 'image_blob_ref') return '[图片] ' + (b.original_filename || b.blob_path || b.blob_id || 'image')
+              return ''
+            }).filter(Boolean)
+            return parts.join('\n')
+          }
           if (content && typeof content === 'object' && content.text) return content.text
+          if (content === null || content === undefined) return ''
+          console.warn('[extractText] 未知 content 类型:', typeof content, JSON.stringify(content).slice(0, 200))
           return ''
         }
 
@@ -1036,28 +1079,18 @@
 
             // 全量重解析子代理节点
             const rawLines = agent._cachedContent.trim().split('\n')
-            const parsedLines = [], idMap = {}, childrenMap = {}, skipTypes = new Set(['file-history-snapshot', 'reasoning'])
+            const parsedLines = [], idMap = {}, skipTypes = new Set(['file-history-snapshot'])
             for (let i = 0; i < rawLines.length; i++) {
               try { var d = JSON.parse(rawLines[i]) } catch (e) { continue }
               if (!d || !d.id || skipTypes.has(d.type)) continue
+              d._key = (d.id || d.type || 'row') + ':' + i
               parsedLines.push(d)
-              idMap[d.id] = d
-              const pid = d.parentId || '__root__'
-              if (!childrenMap[pid]) childrenMap[pid] = []
-              childrenMap[pid].push(d)
+              if (d.id && !idMap[d.id]) idMap[d.id] = d
             }
-            const allNodes = [], visited = new Set()
-            function dfs(id) {
-              const d = idMap[id]
-              if (!d || visited.has(id)) return
-              visited.add(id)
+            const allNodes = []
+            for (const d of parsedLines) {
               renderNode(d, allNodes, 0)
-              const children = childrenMap[id]
-              if (children) children.forEach(child => dfs(child.id))
             }
-            const roots = childrenMap['__root__'] || []
-            roots.forEach(d => dfs(d.id))
-            for (const d of parsedLines) { if (visited.has(d.id)) continue; dfs(d.id) }
 
             // 设置吸附滚动标志
             if (wasSnapped) {
@@ -1125,6 +1158,23 @@
         function scrollToBottom() {
           if (!msgContainer.value) return
           msgContainer.value.scrollTo({ top: msgContainer.value.scrollHeight, behavior: 'smooth' })
+        }
+
+        async function copyFilePath(path) {
+          try {
+            await navigator.clipboard.writeText(path)
+          } catch (e) {
+            const ta = document.createElement('textarea')
+            ta.value = path
+            ta.style.position = 'fixed'; ta.style.left = '-9999px'
+            document.body.appendChild(ta)
+            ta.select()
+            document.execCommand('copy')
+            document.body.removeChild(ta)
+          }
+          copyDone.value = true
+          clearTimeout(copyTimer)
+          copyTimer = setTimeout(() => { copyDone.value = false }, 1500)
         }
 
         /* ===== 核心：无感追加消息并自动滚动 ===== */
@@ -1203,8 +1253,8 @@
           for (let k = 0; k < 3; k++) {
             const uid = 'debug-' + ts + '-' + seq + '-u' + k
             const aid = 'debug-' + ts + '-' + seq + '-a' + k
-            const userText = '🔧【调试插入 #' + (k+1) + '】' + new Date().toLocaleTimeString() + '\n' + randomChinese(100)
-            const assistantText = '✅ 调试回复 #' + (k+1) + '：' + randomChinese(80)
+            const userText = '🔧【调试插入 #' + (k + 1) + '】' + new Date().toLocaleTimeString() + '\n' + randomChinese(100)
+            const assistantText = '✅ 调试回复 #' + (k + 1) + '：' + randomChinese(80)
             rawAppend.push(
               JSON.stringify({ id: uid, type: 'message', role: 'user', content: '<user_query>' + userText + '</user_query>', timestamp: ts + k * 10 }),
               JSON.stringify({ id: aid, type: 'message', role: 'assistant', parentId: uid, content: assistantText, timestamp: ts + k * 10 + 1 }),
@@ -1239,17 +1289,17 @@
           if (nodes.length === 0) return
           allToolsCollapsed.value = !allToolsCollapsed.value
           nodes.forEach(n => {
-            if (n.type === 'tool_call') {
+            if (n.type === 'tool_call' || n.type === 'reasoning') {
               n.collapsed = allToolsCollapsed.value
-              toolCollapsedState[n.id] = allToolsCollapsed.value
+              toolCollapsedState[n.stateKey || n.id] = allToolsCollapsed.value
             }
           })
         }
 
-        // 切换单个工具折叠，同步持久化
+        // 切换单个工具/推理折叠，同步持久化
         function toggleToolCollapse(node) {
           node.collapsed = !node.collapsed
-          toolCollapsedState[node.id] = node.collapsed
+          toolCollapsedState[node.stateKey || node.id] = node.collapsed
         }
 
         function formatToolArgs(args) {
@@ -1394,6 +1444,7 @@
         onUnmounted(() => {
           stopAutoRefresh()
           clearTimeout(loadMoreTimer)
+          clearTimeout(copyTimer)
         })
 
         return {
@@ -1401,12 +1452,12 @@
           currentSessionId, msgContainer, searchQuery, loading, totalConvs,
           expandedProjects, projectConvCache, sidebarCollapsed, sidebarOpen,
           filteredProjects, sidebarItems, renderedMessages, agentTags,
-          autoRefresh, refreshInterval, autoScroll, scrollThreshold, isSnapped, debugMode, displayCount,
+          autoRefresh, refreshInterval, autoScroll, scrollThreshold, isSnapped, debugMode, copyDone, displayCount,
           allToolsCollapsed,
           loadProjects, toggleProject, isProjectCollapsed,
           selectConversation, jumpToSubAgent, switchToAgent,
           renderMarkdown, onMsgScroll,
-          refreshCurrentView, toggleAllTools, toggleToolCollapse, formatToolArgs, scrollToTop, scrollToBottom,
+          refreshCurrentView, toggleAllTools, toggleToolCollapse, formatToolArgs, scrollToTop, scrollToBottom, copyFilePath,
           debugInsertData,
         }
       }

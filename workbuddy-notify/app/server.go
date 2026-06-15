@@ -45,6 +45,7 @@ type ConvInfo struct {
 	Timestamp     int64  `json:"timestamp"`
 	ProjectName   string `json:"project_name,omitempty"`
 	Status        string `json:"status,omitempty"` // completed / working / pending / failed
+	FilePath      string `json:"file_path,omitempty"` // 本地 JSONL 绝对路径
 }
 
 // APIResponse 通用 API 响应
@@ -583,6 +584,7 @@ func parseConvFile(filePath, sessionID, projectName string) *ConvInfo {
 		SubAgentCount: subAgentCount,
 		Timestamp:     timestamp,
 		ProjectName:   projectName,
+		FilePath:      filePath,
 	}
 }
 
