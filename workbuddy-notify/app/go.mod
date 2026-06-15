@@ -1,4 +1,4 @@
-module codebuddy-notify
+module workbuddy-notify
 
 go 1.25.0
 

@@ -1,4 +1,4 @@
-﻿# Run script for codebuddy-notify
+﻿# Run script for workbuddy-notify
 # Usage:
 #   .\run.ps1                        - 任务监听 + Web 服务（默认 8080）
 #   .\run.ps1 -Server                - 仅 Web 服务
@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$binary = "dist\codebuddy-notify.exe"
+$binary = "dist\workbuddy-notify.exe"
 if (-not (Test-Path $binary)) {
     Write-Error "未找到 $binary，请先运行 build.ps1"
     exit 1

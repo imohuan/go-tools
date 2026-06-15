@@ -1,8 +1,8 @@
-﻿# Build script for codebuddy-notify
+﻿# Build script for workbuddy-notify
 # Usage: .\build.ps1
 
 param(
-    [string]$ExeName = "codebuddy-notify.exe"
+    [string]$ExeName = "workbuddy-notify.exe"
 )
 
 $ErrorActionPreference = "Stop"
