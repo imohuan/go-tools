@@ -19,7 +19,7 @@ import (
 
 var _ = embed.FS{}
 
-//go:embed web/assets/conversation-viewer.html
+//go:embed index.html
 var viewerHTML string
 
 // ========== 数据结构 ==========

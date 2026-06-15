@@ -26,22 +26,18 @@
   }
   .msg-content pre code { background: none; padding: 0; }
 
-  /* 滚动条 */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #d0d5dd; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #b0b5bd; }
 
-  /* 过渡 */
   .fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
   .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
 </head>
 <body class="h-full bg-white text-gray-900 antialiased">
 <div id="app" class="h-full flex flex-col">
-  <!-- 顶部栏 -->
   <header class="h-12 flex items-center px-4 gap-3 border-b border-gray-200 bg-white flex-shrink-0 z-10">
-    <!-- 侧栏折叠按钮 -->
     <button
       @click="sidebarCollapsed = !sidebarCollapsed"
       class="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors flex-shrink-0"
@@ -56,100 +52,55 @@
       <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]"></span>
       <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]"></span>
     </div>
-    <span class="font-semibold text-sm tracking-tight">WB 对话查看器 （C:\Users\~\.workbuddy\projects）</span>
-    <span v-if="dirName" class="text-xs text-gray-400 truncate max-w-[200px]">{{ dirName }}</span>
+    <span class="font-semibold text-sm tracking-tight">WB 对话查看器 (API)</span>
+    <span class="text-xs text-gray-400 truncate max-w-[200px]">{{ projects.length }} 项目</span>
 
-    <!-- 右侧：定时刷新 + 自动滚动 -->
     <div v-if="activeConv" class="ml-auto flex items-center gap-2.5">
       <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
         <input type="checkbox" v-model="autoRefresh" class="w-3.5 h-3.5 rounded border-gray-300 text-green-600 focus:ring-green-500" />
         定时刷新
       </label>
-      <input
-        v-if="autoRefresh"
-        v-model.number="refreshInterval"
-        type="number" min="1" max="60"
-        class="w-12 px-1 py-0.5 text-xs text-center border border-gray-200 rounded"
-        title="刷新间隔（秒）"
-      />
+      <input v-if="autoRefresh" v-model.number="refreshInterval" type="number" min="1" max="60"
+        class="w-12 px-1 py-0.5 text-xs text-center border border-gray-200 rounded" title="刷新间隔（秒）" />
       <span v-if="autoRefresh" class="text-[10px] text-gray-400">秒</span>
-
       <span class="text-gray-200">|</span>
-
       <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
         <input type="checkbox" v-model="autoScroll" class="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
         自动滚动
       </label>
-      <input
-        v-model.number="scrollThreshold"
-        type="number" min="20" max="500" step="10"
-        class="w-12 px-1 py-0.5 text-xs text-center border border-gray-200 rounded"
-        title="吸附阈值（像素，距底小于此值即吸附）"
-      />
+      <input v-model.number="scrollThreshold" type="number" min="20" max="500" step="10"
+        class="w-12 px-1 py-0.5 text-xs text-center border border-gray-200 rounded" title="吸附阈值" />
       <span class="text-[10px] text-gray-400">px</span>
       <span v-if="autoRefresh" class="text-[10px] text-green-500 animate-pulse">●</span>
     </div>
   </header>
 
-  <!-- 主区域 -->
   <div class="flex flex-1 overflow-hidden">
-
-    <!-- ====== 左侧栏 ====== -->
     <aside
       class="flex-shrink-0 flex flex-col bg-gray-50 border-r border-gray-200 transition-all duration-200 overflow-hidden"
       :class="sidebarCollapsed ? 'w-0 border-r-0' : 'w-[320px]'"
     >
-      <!-- 文件夹选择 -->
       <div class="p-4 border-b border-gray-200 space-y-3">
-        <button
-          @click="pickFolder"
-          class="w-full py-2.5 px-4 rounded-lg border-2 border-dashed border-indigo-300 text-indigo-600 font-medium text-sm hover:bg-indigo-50 hover:border-indigo-400 transition-colors"
-        >
-          <span v-if="!dirHandle">📁 选择 JSONL 文件夹</span>
-          <span v-else>📁 切换文件夹</span>
-        </button>
-
-        <!-- 扫描模式切换 -->
-        <div v-if="dirHandle" class="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
-          <button @click="setScanMode('flat')"
-            class="flex-1 py-1.5 px-2 text-center transition-colors"
-            :class="scanMode === 'flat' ? 'bg-indigo-100 text-indigo-700 font-medium' : 'text-gray-500 hover:bg-gray-100'">
-            扁平模式
+        <div class="flex items-center gap-2">
+          <button @click="loadProjects" :disabled="loading" class="text-xs px-2 py-1 rounded text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50">
+            {{ loading ? '加载中...' : '⟳ 刷新' }}
           </button>
-          <button @click="setScanMode('nested')"
-            class="flex-1 py-1.5 px-2 text-center transition-colors"
-            :class="scanMode === 'nested' ? 'bg-indigo-100 text-indigo-700 font-medium' : 'text-gray-500 hover:bg-gray-100'">
-            嵌套项目
-          </button>
+          <span class="text-xs text-gray-400">{{ projects.length }} 项目 / {{ totalConvs }} 对话</span>
         </div>
-        <div v-if="!dirHandle" class="text-xs text-gray-400 text-center leading-relaxed">
-          选择包含 .jsonl 文件的目录<br>
-          <span class="text-gray-300">扁平模式：目录下有.jsonl ｜ 嵌套模式：扫描子目录</span>
-        </div>
-        <!-- 搜索 -->
-        <input
-          v-if="dirHandle"
-          v-model="searchQuery"
-          type="text"
-          placeholder="搜索对话..."
-          class="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 bg-white"
-        />
+        <input v-model="searchQuery" type="text" placeholder="搜索对话..."
+          class="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 bg-white" />
       </div>
 
-      <!-- 对话列表 -->
       <div class="flex-1 overflow-y-auto px-2 py-1">
-        <!-- 空状态 -->
-        <div v-if="!dirHandle" class="flex items-center justify-center h-full">
-          <p class="text-sm text-gray-400">选择文件夹以加载对话</p>
+        <div v-if="loading" class="flex items-center justify-center h-32">
+          <p class="text-sm text-gray-400">加载中...</p>
         </div>
-        <div v-else-if="filteredProjects.length === 0" class="flex items-center justify-center h-full">
-          <p class="text-sm text-gray-400">未找到 .jsonl 文件</p>
+        <div v-else-if="filteredProjects.length === 0" class="flex items-center justify-center h-32">
+          <p class="text-sm text-gray-400">{{ searchQuery ? '无匹配结果' : '暂无数据' }}</p>
         </div>
 
-        <!-- 列表 -->
         <template v-for="proj in filteredProjects" :key="proj.key">
-          <!-- 嵌套模式：可折叠项目分组头 -->
-          <div v-if="scanMode === 'nested'" class="group">
+          <div class="group">
             <div
               @click="toggleProject(proj.projectName)"
               class="px-3 py-1.5 mt-2 mb-0.5 flex items-center gap-1.5 text-[10px] text-gray-400 font-semibold uppercase tracking-wider cursor-pointer hover:text-gray-600 select-none"
@@ -160,17 +111,14 @@
             </div>
           </div>
 
-          <!-- 对话项（嵌套模式有缩进） -->
           <div v-if="!isProjectCollapsed(proj.projectName)">
-            <div
-              v-for="conv in proj.convs"
-              :key="conv.sessionId"
+
+            <div v-for="conv in (projectConvCache[proj.projectName] || [])" :key="conv.sessionId"
               @click="selectConversation(conv)"
-              class="px-3 py-2.5 mb-1 rounded-lg cursor-pointer transition-colors border"
+              class="px-3 py-2.5 ml-4 mb-1 rounded-lg cursor-pointer transition-colors border"
               :class="[activeConv && activeConv.sessionId === conv.sessionId
                 ? 'bg-indigo-50 border-indigo-300'
-                : 'bg-white border-gray-100 hover:border-gray-300 hover:bg-gray-50',
-                scanMode === 'nested' ? 'ml-4' : '']"
+                : 'bg-white border-gray-100 hover:border-gray-300 hover:bg-gray-50']"
             >
               <div class="text-sm font-medium text-gray-900 truncate" :title="conv.title">
                 {{ conv.title }}
@@ -189,23 +137,19 @@
       </div>
     </aside>
 
-    <!-- ====== 右侧对话区 ====== -->
     <section class="flex-1 flex flex-col overflow-hidden bg-white">
-      <!-- 空状态 -->
       <div v-if="!activeConv" class="flex-1 flex items-center justify-center">
         <div class="text-center">
           <div class="text-4xl mb-3">💬</div>
-          <p class="text-gray-400 text-sm">选择一个对话查看详情</p>
+          <p class="text-gray-400 text-sm">选择一个项目展开并加载对话</p>
         </div>
       </div>
 
       <template v-else>
-        <!-- 对话头部 + 面包屑 -->
         <div class="px-5 py-3 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
           <span class="font-semibold text-sm text-gray-900 truncate max-w-[400px]">
             {{ activeConv.title }}
           </span>
-          <!-- 面包屑 -->
           <div v-if="agentChain.length > 0" class="flex items-center gap-1.5 text-xs">
             <span class="text-gray-300">|</span>
             <button
@@ -222,7 +166,6 @@
           </div>
         </div>
 
-        <!-- 消息列表（含可见性优化） -->
         <div class="flex-1 overflow-y-auto px-5 py-4 space-y-3" ref="msgContainer" @scroll="onMsgScroll">
           <template v-for="node in renderedMessages" :key="node.id">
             <div
@@ -232,15 +175,12 @@
               class="msg-wrapper overflow-hidden flex-shrink-0"
             >
               <template v-if="msgVisible[node.id]">
-                <!-- 用户消息 -->
                 <div v-if="node.type === 'user'" class="flex justify-end">
                   <div class="max-w-[80%] px-4 py-2.5 rounded-xl bg-indigo-50 border border-indigo-100 text-sm msg-content" v-html="renderMarkdown(node.text)"></div>
                 </div>
-                <!-- 助手消息 -->
                 <div v-else-if="node.type === 'assistant'" class="flex justify-start">
                   <div class="max-w-[80%] px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-sm msg-content" v-html="renderMarkdown(node.text)"></div>
                 </div>
-                <!-- 工具调用 -->
                 <div v-else-if="node.type === 'tool_call'" class="rounded-lg bg-orange-50 border border-orange-200">
                   <div class="flex items-center gap-2 px-4 py-2.5 cursor-pointer hover:bg-orange-100/50 transition-colors"
                        @click="node.collapsed = !node.collapsed">
@@ -260,7 +200,6 @@
                     <div v-else class="px-4 py-2 text-xs text-gray-400 italic">等待执行结果...</div>
                   </div>
                 </div>
-                <!-- 子代理跳转卡片 -->
                 <div
                   v-else-if="node.type === 'subagent'"
                   @click="jumpToSubAgent(node)"
@@ -273,7 +212,6 @@
                   </div>
                   <span class="text-xs text-green-500 font-medium group-hover:translate-x-1 transition-transform whitespace-nowrap">跳转 →</span>
                 </div>
-                <!-- 系统提示 -->
                 <div v-else-if="node.type === 'system'" class="text-center">
                   <span class="inline-block px-3 py-1 text-xs text-gray-400 bg-gray-50 rounded-full border border-gray-100">
                     {{ node.text }}
@@ -284,7 +222,6 @@
           </template>
         </div>
 
-        <!-- 底部子代理标签栏 -->
         <div
           v-if="agentTags.length > 1"
           class="h-12 flex-shrink-0 border-t-2 border-dashed border-green-200 bg-green-50/50 flex items-center px-4 gap-2 overflow-x-auto max-w-full"
@@ -314,68 +251,77 @@ const { createApp, ref, reactive, computed, nextTick, watch, onUnmounted } = Vue
 
 createApp({
   setup() {
-    let counter = 0
-    const dirHandle = ref(null)
-    const dirName = ref('')
-    const searchQuery = ref('')
+    const projects = ref([])
     const conversations = ref([])
     const activeConv = ref(null)
     const activeConvData = ref(null)
     const agentChain = ref([])
-    const currentSessionId = ref('')   // 当前查看的 sessionId，替代 index
-    const mainDiscoveredSubs = ref([]) // 主对话发现的子代理，底部标签栏始终显示
+    const currentSessionId = ref('')
+    const mainDiscoveredSubs = ref([])
     const msgContainer = ref(null)
     const sidebarCollapsed = ref(false)
-    const pendingConvId = ref('')      // URL 指定的待加载对话
-    const scanMode = ref('flat')       // 'flat' | 'nested' 扫描模式
-    const collapsedProjects = ref(new Set()) // 嵌套模式下折叠的项目名
+    const searchQuery = ref('')
+    const loading = ref(false)
+    const totalConvs = ref(0)
+    const collapsedProjects = ref(new Set())
+    const projectConvCache = reactive({})
 
-    // 定时刷新
-    const autoRefresh = ref(true)     // 默认开启
-    const refreshInterval = ref(3)     // 默认 3 秒
-    const autoScroll = ref(true)       // 是否吸附滚动
-    const scrollThreshold = ref(80)    // 吸附阈值（像素）
-    const displayCount = ref(50)       // 每次显示的消息数
-    const isLoadingMore = ref(false)   // 是否正在加载更多
+    const autoRefresh = ref(true)
+    const refreshInterval = ref(5)
+    const autoScroll = ref(true)
+    const scrollThreshold = ref(80)
+    const displayCount = ref(50)
+    const isLoadingMore = ref(false)
     let loadMoreTimer = null
-    const batchSize = 20               // 每次加载的消息数（减少以提升性能）
+    const batchSize = 20
     let refreshTimer = null
     let scrollRaf = null
     let msgObserver = null
 
-    // 可见性优化：IntersectionObserver
     const msgVisible = reactive({})
     const msgHeights = reactive({})
     const observerInitialized = ref(false)
 
-    /* ========== 文件夹操作 ========== */
-    async function pickFolder() {
-      try {
-        const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
-        dirHandle.value = handle
-        dirName.value = handle.name
-        activeConv.value = null
-        activeConvData.value = null
-        agentChain.value = []
-        storeHandle(handle)
-        await loadConversations()
-      } catch (e) {
-        if (e.name !== 'AbortError') {
-          console.error('选择文件夹失败:', e)
-          alert('需要浏览器支持 File System Access API（Chrome/Edge 86+）')
-        }
-      }
-    }
+    /* ========== API 数据加载 ========== */
 
-    function setScanMode(mode) {
-      scanMode.value = mode
-      activeConv.value = null
-      activeConvData.value = null
-      agentChain.value = []
-      mainDiscoveredSubs.value = []
-      collapsedProjects.value = new Set()
-      updateUrlQuery(activeConv.value?.sessionId || '', mode)
-      loadConversations()
+    async function loadProjects() {
+      console.log('[API] loadAll start')
+      loading.value = true
+      try {
+        const res = await fetch('/api/all-conversations')
+        const json = await res.json()
+        console.log('[API] loadAll result: success=', json.success)
+        if (json.success && json.data) {
+          projects.value = json.data.projects || []
+
+          // 一次性填充所有项目对话缓存
+          const all = []
+          projects.value.forEach(proj => {
+            const convs = (proj.conversations || []).map(c => ({
+              sessionId: c.session_id,
+              title: c.title,
+              date: c.date,
+              msgCount: c.msg_count,
+              subAgentCount: c.sub_agent_count,
+              timestamp: c.timestamp,
+              projectName: c.project_name || proj.name,
+            }))
+            projectConvCache[proj.name] = convs
+            all.push(...convs)
+          })
+          all.sort((a, b) => b.timestamp - a.timestamp)
+          conversations.value = all
+          totalConvs.value = json.data.total_convs || all.length
+
+          const s = new Set()
+          projects.value.forEach(p => s.add(p.name))
+          collapsedProjects.value = s
+          console.log('[API] loadAll done: projects=', projects.value.length, 'convs=', totalConvs.value)
+        }
+      } catch (e) {
+        console.error('[API] loadAll error:', e)
+      }
+      loading.value = false
     }
 
     function toggleProject(name) {
@@ -389,163 +335,51 @@ createApp({
       return collapsedProjects.value.has(name)
     }
 
-    async function loadConversations() {
-      if (!dirHandle.value) return
-      const list = []
-
-      if (scanMode.value === 'flat') {
-        // 扁平模式：根目录下的 .jsonl
-        for await (const [name, handle] of dirHandle.value.entries()) {
-          if (handle.kind !== 'file' || !name.endsWith('.jsonl')) continue
-          if (name.startsWith('agent-')) continue
-          const file = await handle.getFile()
-          const text = await file.text()
-          const info = parseConvInfo(text, name, '')
-          if (info) {
-            info.fileHandle = handle
-            info.projectName = ''
-            list.push(info)
-          }
-        }
-      } else {
-        // 嵌套模式：扫描子目录，每个子目录是一个项目
-        for await (const [name, handle] of dirHandle.value.entries()) {
-          if (handle.kind !== 'directory' || name.startsWith('.')) continue
-          for await (const [fname, fhandle] of handle.entries()) {
-            if (fhandle.kind !== 'file' || !fname.endsWith('.jsonl')) continue
-            if (fname.startsWith('agent-')) continue
-            const file = await fhandle.getFile()
-            const text = await file.text()
-            const info = parseConvInfo(text, fname, name)
-            if (info) {
-              info.fileHandle = fhandle
-              info.projectName = name
-              info.projectDirHandle = handle
-              list.push(info)
-            }
-          }
-        }
-      }
-
-      list.sort((a, b) => b.timestamp - a.timestamp)
-      conversations.value = list
-
-      // 嵌套模式：默认全部折叠
-      if (scanMode.value === 'nested') {
-        const names = new Set()
-        list.forEach(c => { if (c.projectName) names.add(c.projectName) })
-        collapsedProjects.value = names
-      }
-
-      // URL query 指定的对话自动加载
-      if (pendingConvId.value) {
-        const target = list.find(c => c.sessionId === pendingConvId.value)
-        if (target) {
-          pendingConvId.value = ''
-          await selectConversation(target)
-        }
-      }
-    }
-
-    function parseConvInfo(text, filename, projectName) {
-      const lines = text.trim().split('\n')
-      if (!lines.length) return null
-
-      const first = tryParse(lines[0])
-      const last = tryParse(lines[lines.length - 1])
-
-      let title = filename.replace('.jsonl', '')
-      // 从第一条消息提取标题
-      if (first && first.type === 'message' && first.role === 'user') {
-        const ct = extractText(first.content)
-        title = ct.slice(0, 60) || title
-      }
-
-      const timestamp = first?.timestamp || 0
-      const date = timestamp ? fmtTime(timestamp) : ''
-
-      let msgCount = 0
-      let subAgentCount = 0
-      const seenAgents = new Set()
-
-      lines.forEach(l => {
-        const d = tryParse(l)
-        if (!d) return
-        if (d.type === 'message' && (d.role === 'user' || d.role === 'assistant')) msgCount++
-        if (d.type === 'function_call_result' && d.name === 'Agent') {
-          const sid = d.providerData?.toolResult?.subAgent?.sessionId
-          if (sid && !seenAgents.has(sid)) {
-            seenAgents.add(sid)
-            subAgentCount++
-          }
-        }
-      })
-
-      const sessionId = filename.replace('.jsonl', '')
-      return { title, date, msgCount, subAgentCount, timestamp, sessionId, filename }
-    }
-
     /* ========== 选择对话 ========== */
     async function selectConversation(conv) {
+      console.log('[API] selectConversation:', conv.sessionId)
       activeConv.value = conv
       agentChain.value = []
       currentSessionId.value = conv.sessionId
       mainDiscoveredSubs.value = []
-      autoScroll.value = true  // 新对话默认吸附滚动
-      displayCount.value = batchSize  // 重置分页
-      // 重置可见性状态
+      autoScroll.value = true
+      displayCount.value = batchSize
       Object.keys(msgVisible).forEach(k => delete msgVisible[k])
       Object.keys(msgHeights).forEach(k => delete msgHeights[k])
-      // 更新 URL query
-      updateUrlQuery(conv.sessionId, scanMode.value)
       await loadAndRender(conv, false)
-      // 初始化可见性观察器
       initMsgVisibility()
-      // 如果定时刷新已开启，启动定时器
       if (autoRefresh.value) startAutoRefresh()
     }
 
     function initMsgVisibility() {
-      // 先设置所有可见节点可见
       const nodes = renderedMessages.value
       nodes.forEach(n => { msgVisible[n.id] = true })
-      // nextTick 后建立 IntersectionObserver
-      nextTick(() => {
-        setupMsgObserver()
-      })
-    }
-
-    function updateUrlQuery(sessionId, mode) {
-      const url = new URL(window.location)
-      if (sessionId) {
-        url.searchParams.set('conv', sessionId)
-      } else {
-        url.searchParams.delete('conv')
-      }
-      if (mode) {
-        url.searchParams.set('mode', mode)
-      }
-      history.replaceState(null, '', url)
+      nextTick(() => { setupMsgObserver() })
     }
 
     async function loadAndRender(conv, isSubAgent, isRefresh) {
+      console.log('[API] loadAndRender:', conv.sessionId, 'isSubAgent:', isSubAgent)
       let text
       if (isSubAgent) {
         text = conv._cachedContent
       } else {
-        const file = conv.fileHandle
-        if (!file) return
-        const f = await file.getFile()
-        text = await f.text()
+        // 从 API 加载
+        const projectName = conv.projectName || activeConv.value?._projectName
+        const url = `/api/projects/${encodeURIComponent(projectName)}/conversations/${conv.sessionId}`
+        console.log('[API] loadAndRender url:', url)
+        const res = await fetch(url)
+        const json = await res.json()
+        console.log('[API] loadAndRender success:', json.success, 'messages:', json.data?.messages?.length)
+        if (!json.success) { console.error('[API] loadAndRender failed:', json.error); return }
+        text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
         conv._cachedContent = text
       }
 
       const rawLines = text.trim().split('\n')
 
-      // 一次解析所有行
       const parsedLines = []
       const idMap = {}
-      const childrenMap = {}  // parentId → [child objects]
+      const childrenMap = {}
       const skipTypes = new Set(['file-history-snapshot', 'reasoning'])
 
       for (let i = 0; i < rawLines.length; i++) {
@@ -558,7 +392,6 @@ createApp({
         childrenMap[pid].push(d)
       }
 
-      // O(n) DFS
       const allNodes = []
       const visited = new Set()
       function dfs(id) {
@@ -567,22 +400,17 @@ createApp({
         visited.add(id)
         renderNode(d, allNodes, 0)
         const children = childrenMap[id]
-        if (children) {
-          children.forEach(child => dfs(child.id))
-        }
+        if (children) children.forEach(child => dfs(child.id))
       }
 
-      // 从根节点开始
       const roots = childrenMap['__root__'] || []
       roots.forEach(d => dfs(d.id))
 
-      // 处理可能的孤立节点
       for (const d of parsedLines) {
         if (visited.has(d.id)) continue
         dfs(d.id)
       }
 
-      // 收集所有发现的子代理
       const discoveredSubs = []
       allNodes.forEach(n => {
         if (n.type === 'subagent') {
@@ -591,17 +419,13 @@ createApp({
       })
       activeConvData.value = { nodes: allNodes, idMap, conv, text, discoveredSubs }
 
-      // 主对话的发现列表单独存，供底部标签栏使用
       if (!isSubAgent) {
         mainDiscoveredSubs.value = discoveredSubs
       }
 
-      // 滚动：首次加载滚动到底部，刷新时保持位置
       nextTick(() => {
         if (isRefresh) {
-          // 不滚动
         } else if (msgContainer.value) {
-          // 首次加载滚动到底部（显示最新消息）
           msgContainer.value.scrollTop = msgContainer.value.scrollHeight
           autoScroll.value = true
         }
@@ -612,7 +436,6 @@ createApp({
       switch (d.type) {
         case 'message': {
           if (d.role === 'user') {
-            // 过滤 system-reminder，只保留 user_query
             const raw = extractText(d.content)
             const qm = raw.match(/<user_query>(.*?)<\/user_query>/s)
             const text = qm ? qm[1].trim() : raw
@@ -624,10 +447,7 @@ createApp({
           break
         }
         case 'function_call': {
-          if (!d.name && !d.function) {
-            // 可能是子代理调用 → 在 function_call_result 中处理
-            break
-          }
+          if (!d.name && !d.function) break
           const fnName = d.name || d.function?.name || '?'
           let fnArgs = ''
           try {
@@ -644,7 +464,6 @@ createApp({
             const taskPreview = extractText(d.output?.text || '').slice(0, 60)
             nodes.push({ id: d.id, type: 'subagent', agentId, taskPreview, depth })
           } else {
-            // 更新上一个 tool_call 的 result（不截断）
             const last = nodes[nodes.length - 1]
             if (last && last.type === 'tool_call') {
               last.result = extractText(d.output?.text || d.content || '')
@@ -653,17 +472,11 @@ createApp({
           }
           break
         }
-        case 'reasoning': {
-          // 跳过推理内容
+        case 'reasoning':
+        case 'file-history-snapshot':
           break
-        }
-        case 'file-history-snapshot': {
-          // 跳过
-          break
-        }
-        default: {
+        default:
           nodes.push({ id: d.id, type: 'system', text: `[${d.type}]`, depth })
-        }
       }
     }
 
@@ -673,9 +486,8 @@ createApp({
     }
 
     async function loadSubAgentBySessionId(sessionId, taskPreview) {
-      if (!dirHandle.value || !activeConv.value) return
+      if (!activeConv.value) return
 
-      // 如果已加载，直接切换
       const existing = agentChain.value.findIndex(a => a.sessionId === sessionId)
       if (existing >= 0) {
         currentSessionId.value = sessionId
@@ -683,40 +495,37 @@ createApp({
         return
       }
 
-      const convDir = activeConv.value.sessionId
-      let file
-      try {
-        if (scanMode.value === 'nested' && activeConv.value.projectDirHandle) {
-          // 嵌套模式：projectDir/sessionId/subagents/agentId.jsonl
-          const dirEntry = await activeConv.value.projectDirHandle.getDirectoryHandle(convDir)
-          const subDir = await dirEntry.getDirectoryHandle('subagents')
-          file = await subDir.getFileHandle(`${sessionId}.jsonl`)
-        } else {
-          // 扁平模式：sessionId/subagents/agentId.jsonl
-          const dirEntry = await dirHandle.value.getDirectoryHandle(convDir)
-          const subDir = await dirEntry.getDirectoryHandle('subagents')
-          file = await subDir.getFileHandle(`${sessionId}.jsonl`)
+      const mainConv = activeConv.value
+      const projectName = mainConv._projectName || mainConv.projectName
+      const url = `/api/projects/${encodeURIComponent(projectName)}/conversations/${mainConv.sessionId}/subagents/${sessionId}`
+
+      console.log('[API] loadSubAgent:', url)
+      const res = await fetch(url)
+      const json = await res.json()
+      if (!json.success) {
+        const fallbackUrl = `/api/projects/${encodeURIComponent(projectName)}/conversations/${mainConv.sessionId}/subagents/agent-${sessionId}`
+        console.log('[API] loadSubAgent fallback:', fallbackUrl)
+        const res2 = await fetch(fallbackUrl)
+        const json2 = await res2.json()
+        if (!json2.success) {
+          alert(`找不到子代理: ${sessionId}`)
+          return
         }
-      } catch {
-        alert(`找不到子代理文件: ${convDir}/subagents/${sessionId}.jsonl`)
-        return
+        json.data = json2.data
       }
 
-      const f = await file.getFile()
-      const text = await f.text()
+      const text = json.data.messages.map(m => JSON.stringify(m)).join('\n')
 
       const newAgent = {
         sessionId,
         label: `${sessionId.slice(0, 16)} — ${(taskPreview || '').slice(0, 20)}`,
         _cachedContent: text,
-        fileHandle: file,
         title: taskPreview || sessionId,
       }
 
       agentChain.value = [...agentChain.value, newAgent]
       currentSessionId.value = sessionId
       displayCount.value = batchSize
-      // 重置可见性
       Object.keys(msgVisible).forEach(k => delete msgVisible[k])
       Object.keys(msgHeights).forEach(k => delete msgHeights[k])
       await loadAndRender(newAgent, true)
@@ -725,7 +534,6 @@ createApp({
 
     async function switchToAgent(sessionId) {
       if (sessionId === activeConv.value?.sessionId) {
-        // 回到主对话
         currentSessionId.value = sessionId
         displayCount.value = batchSize
         Object.keys(msgVisible).forEach(k => delete msgVisible[k])
@@ -733,7 +541,6 @@ createApp({
         await loadAndRender(activeConv.value, false)
         initMsgVisibility()
       } else {
-        // 切换到子代理（可能需懒加载）
         const tag = agentTags.value.find(t => t.sessionId === sessionId)
         if (tag && !tag.loaded) {
           loadSubAgentBySessionId(sessionId, tag.discovered?.taskPreview || '')
@@ -753,19 +560,9 @@ createApp({
 
     /* ========== Computed ========== */
     const filteredProjects = computed(() => {
-      let list = conversations.value
-      if (searchQuery.value) {
-        const q = searchQuery.value.toLowerCase()
-        list = list.filter(c => c.title.toLowerCase().includes(q))
-      }
-
-      if (scanMode.value === 'flat') {
-        // 扁平模式：所有对话在一个组
-        return list.length > 0 ? [{ key: 'flat', projectName: '', convs: list }] : []
-      } else {
-        // 嵌套模式：按 projectName 分组
+      if (!searchQuery.value) {
         const groups = {}
-        list.forEach(c => {
+        conversations.value.forEach(c => {
           const pn = c.projectName || '(未命名)'
           if (!groups[pn]) groups[pn] = []
           groups[pn].push(c)
@@ -774,6 +571,18 @@ createApp({
           key: name, projectName: name, convs
         }))
       }
+
+      const q = searchQuery.value.toLowerCase()
+      const filtered = conversations.value.filter(c => c.title.toLowerCase().includes(q))
+      const groups = {}
+      filtered.forEach(c => {
+        const pn = c.projectName || '(未命名)'
+        if (!groups[pn]) groups[pn] = []
+        groups[pn].push(c)
+      })
+      return Object.entries(groups).map(([name, convs]) => ({
+        key: name, projectName: name, convs
+      }))
     })
 
     const renderedMessages = computed(() => {
@@ -785,14 +594,9 @@ createApp({
     const agentTags = computed(() => {
       const tags = []
       if (!activeConv.value) return tags
-
-      // 主对话
       tags.push({ sessionId: activeConv.value.sessionId, label: '主对话', loaded: true })
-
-      // 子代理：按 mainDiscoveredSubs 的顺序，已加载的优先取 agentChain 的 label
       const loadedMap = {}
       agentChain.value.forEach(a => { loadedMap[a.sessionId] = a })
-
       mainDiscoveredSubs.value.forEach(ds => {
         if (loadedMap[ds.sessionId]) {
           tags.push({ sessionId: ds.sessionId, label: loadedMap[ds.sessionId].label, loaded: true })
@@ -805,7 +609,6 @@ createApp({
           })
         }
       })
-
       return tags
     })
 
@@ -813,9 +616,7 @@ createApp({
       if (!text) return ''
       let html = text
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        // 去掉 @image# 引用
         .replace(/@image#\d+:\S+(\.png|\.jpg|\.jpeg|\.gif|\.webp)?/gi, '<span class="text-gray-400 text-xs">[图片]</span>')
-        // 去掉 @file 引用
         .replace(/@([\w./\\-]+)/g, '<code class="text-xs">@$1</code>')
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -823,7 +624,7 @@ createApp({
       return html
     }
 
-    /* ========== 定时刷新 + 吸附滚动 ========== */
+    /* ========== 定时刷新 ========== */
     function startAutoRefresh() {
       stopAutoRefresh()
       const ms = Math.max(1, refreshInterval.value || 5) * 1000
@@ -839,8 +640,6 @@ createApp({
       const el = msgContainer.value
       const threshold = scrollThreshold.value || 80
       autoScroll.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold
-
-      // 滚动到顶部时加载更多（防抖）
       if (el.scrollTop < 180 && !isLoadingMore.value && !loadMoreTimer) {
         loadMoreTimer = setTimeout(() => {
           loadMoreTimer = null
@@ -851,23 +650,18 @@ createApp({
 
     function loadMoreMessages() {
       const nodes = activeConvData.value?.nodes || []
-      if (displayCount.value >= nodes.length) return // 已全部加载
+      if (displayCount.value >= nodes.length) return
       if (isLoadingMore.value) return
       isLoadingMore.value = true
-
       const el = msgContainer.value
       const oldScrollHeight = el ? el.scrollHeight : 0
-
       displayCount.value = Math.min(displayCount.value + batchSize, nodes.length)
-
-      // 恢复滚动位置（新增内容在顶部）
       nextTick(() => {
         requestAnimationFrame(() => {
           if (el) {
             const newScrollHeight = el.scrollHeight
             el.scrollTop = (el.scrollTop || 0) + (newScrollHeight - oldScrollHeight)
           }
-          // 新节点默认可见
           const allNodes = activeConvData.value?.nodes || []
           allNodes.forEach(n => { if (!(n.id in msgVisible)) msgVisible[n.id] = true })
           isLoadingMore.value = false
@@ -884,9 +678,7 @@ createApp({
           const id = entry.target.dataset.msgId
           if (!id) return
           if (entry.isIntersecting) {
-            // 进入可视区：显示内容
             msgVisible[id] = true
-            // 延迟清除固定高度，等待 Vue 渲染
             nextTick(() => {
               requestAnimationFrame(() => {
                 const el = entry.target
@@ -898,7 +690,6 @@ createApp({
               })
             })
           } else {
-            // 离开可视区：记录高度，隐藏内容
             const h = entry.target.getBoundingClientRect().height
             if (h > 0) msgHeights[id] = h
             msgVisible[id] = false
@@ -936,8 +727,6 @@ createApp({
       })
     }
 
-    /* ========== 定时刷新 + 吸附滚动 ========== */
-
     function snapshotCollapsed(nodes) {
       const map = {}
       nodes.forEach(n => { if (n.type === 'tool_call') map[n.id] = n.collapsed })
@@ -952,29 +741,20 @@ createApp({
 
     async function refreshCurrentView() {
       if (!activeConv.value) return
-
-      // 保存当前 collapsed 状态
       const collapsedMap = snapshotCollapsed(activeConvData.value?.nodes || [])
-
       if (currentSessionId.value === activeConv.value.sessionId) {
         await loadAndRender(activeConv.value, false, true)
       } else {
         const agent = agentChain.value.find(a => a.sessionId === currentSessionId.value)
         if (agent) await loadAndRender(agent, true, true)
       }
-
-      // 新节点默认可见
       const nodes = activeConvData.value?.nodes || []
       nodes.forEach(n => { if (!(n.id in msgVisible)) msgVisible[n.id] = true })
-
-      // 恢复 collapsed + 自动滚动
       await nextTick()
       restoreCollapsed(activeConvData.value?.nodes || [], collapsedMap)
-      // 延迟再滚动，确保可见性 culling 的 DOM 更新完毕
       setTimeout(() => scrollToBottom(), 300)
     }
 
-    // 监听定时开关变化
     watch(autoRefresh, (val) => {
       if (val) startAutoRefresh()
       else stopAutoRefresh()
@@ -990,7 +770,11 @@ createApp({
     }
 
     function extractText(content) {
-      if (typeof content === 'string') return content
+      if (typeof content === 'string') {
+        const qm = content.match(/<user_query>([\s\S]*?)<\/user_query>/s)
+        if (qm) return qm[1].trim()
+        return content
+      }
       if (Array.isArray(content)) {
         return content
           .filter(b => b && typeof b === 'object')
@@ -1001,65 +785,9 @@ createApp({
       return ''
     }
 
-    function fmtTime(ts) {
-      if (!ts) return ''
-      const d = new Date(ts)
-      return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) +
-        ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-    }
+    /* ========== 初始化 ========== */
+    loadProjects()
 
-    /* ========== 持久化 ========== */
-    async function restoreHandle() {
-      try {
-        const db = await openDB()
-        const stored = await getStoredHandle(db)
-        if (stored) {
-          const perm = await stored.queryPermission({ mode: 'readwrite' })
-          if (perm === 'granted') {
-            dirHandle.value = stored
-            dirName.value = stored.name
-            await loadConversations()
-          }
-        }
-      } catch { /* 静默失败 */ }
-    }
-
-    function openDB() {
-      return new Promise((resolve, reject) => {
-        const req = indexedDB.open('wb-conv-viewer', 1)
-        req.onupgradeneeded = () => req.result.createObjectStore('handles')
-        req.onsuccess = () => resolve(req.result)
-        req.onerror = () => reject(req.error)
-      })
-    }
-
-    function storeHandle(handle) {
-      openDB().then(db => {
-        const tx = db.transaction('handles', 'readwrite')
-        tx.objectStore('handles').put(handle, 'lastDir')
-      }).catch(() => {})
-    }
-
-    function getStoredHandle(db) {
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction('handles', 'readonly')
-        const req = tx.objectStore('handles').get('lastDir')
-        req.onsuccess = () => resolve(req.result)
-        req.onerror = () => reject(req.error)
-      })
-    }
-
-    // 初始化
-    // 读取 URL query
-    const urlParams = new URLSearchParams(window.location.search)
-    pendingConvId.value = urlParams.get('conv') || ''
-    const urlMode = urlParams.get('mode')
-    if (urlMode === 'nested' || urlMode === 'flat') {
-      scanMode.value = urlMode
-    }
-    restoreHandle()
-
-    // 组件卸载时清理定时器
     onUnmounted(() => {
       stopAutoRefresh()
       cancelAnimationFrame(scrollRaf)
@@ -1068,11 +796,12 @@ createApp({
     })
 
     return {
-      dirHandle, dirName, searchQuery, conversations, activeConv,
-      activeConvData, agentChain, currentSessionId, msgContainer,
+      projects, conversations, activeConv, activeConvData, agentChain,
+      currentSessionId, msgContainer, searchQuery, loading, totalConvs,
+      collapsedProjects, projectConvCache,
       filteredProjects, renderedMessages, agentTags,
-      scanMode, sidebarCollapsed, autoRefresh, refreshInterval, autoScroll, scrollThreshold, displayCount,
-      pickFolder, setScanMode, toggleProject, isProjectCollapsed,
+      sidebarCollapsed, autoRefresh, refreshInterval, autoScroll, scrollThreshold, displayCount,
+      loadProjects, toggleProject, isProjectCollapsed,
       selectConversation, jumpToSubAgent, switchToAgent,
       renderMarkdown, onMsgScroll, observeMsg, msgVisible, msgHeights,
     }
