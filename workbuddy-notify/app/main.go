@@ -121,7 +121,7 @@ func runAll(port int, dbPath string) {
 		startMonitor(cfg)
 	}()
 
-	// 启动 Web 服务（主线程，阻塞）
+	// 启动 Web 服务（主线程，阻塞）— 内部自动打开浏览器
 	StartServer(port, "", dbPath)
 }
 

@@ -9,8 +9,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -690,7 +692,18 @@ func StartServer(port int, projectsDir, dbPath string) {
 }
 
 func openBrowser(url string) error {
-	_, err := sql.Open("dummy", "")
-	_ = err
-	return nil // TODO: windows shell open
+	var cmd string
+	var args []string
+	switch {
+	case strings.Contains(runtime.GOOS, "windows"):
+		cmd = "cmd"
+		args = []string{"/c", "start", url}
+	case runtime.GOOS == "darwin":
+		cmd = "open"
+		args = []string{url}
+	default:
+		cmd = "xdg-open"
+		args = []string{url}
+	}
+	return exec.Command(cmd, args...).Start()
 }
