@@ -33,9 +33,10 @@ type SessionChange struct {
 
 // SessionMonitor 会话状态监听器
 type SessionMonitor struct {
-	db     *sql.DB
-	mu     sync.Mutex
-	states map[string]string // sessionID -> status
+	db         *sql.DB
+	mu         sync.Mutex
+	states     map[string]string // sessionID -> status
+	firstPoll  bool              // 是否是第一次轮询（只建基线，不通知）
 }
 
 func OpenSQLite(path string) (*sql.DB, error) {
@@ -53,12 +54,30 @@ func OpenSQLite(path string) (*sql.DB, error) {
 
 func NewSessionMonitor(db *sql.DB) *SessionMonitor {
 	return &SessionMonitor{
-		db:     db,
-		states: make(map[string]string),
+		db:        db,
+		states:    make(map[string]string),
+		firstPoll: true, // 第一轮只建基线
 	}
 }
 
-// Refresh 刷新状态，返回所有 working → completed/failed 的变更
+// terminalStatuses 需要发通知的终态
+var terminalStatuses = map[string]bool{
+	"completed": true,
+	"failed":    true,
+	"error":     true,
+}
+
+// isTerminalStatus 判断是否是终态（需要通知的状态）
+func isTerminalStatus(status string) bool {
+	return terminalStatuses[status]
+}
+
+// Refresh 刷新状态，返回所有状态变更的 session（调用方根据终态发通知）
+//
+// 逻辑：每轮全量拉取 DB，与内存中的 m.states（上一轮状态）比对。
+// - 任何状态变化都打日志
+// - 只有变成 completed/failed/error 才加入 changes 返回
+// - 第一轮启动时 existed=false，若已是终态说明是"错过的"任务，也通知
 func (m *SessionMonitor) Refresh() []SessionChange {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -71,15 +90,19 @@ func (m *SessionMonitor) Refresh() []SessionChange {
 		ORDER BY updated_at DESC
 	`)
 	if err != nil {
-		log.Printf("查询 sessions 失败: %v", err)
+		log.Printf("[Monitor] 查询 sessions 失败: %v", err)
 		return nil
 	}
 	defer rows.Close()
 
 	var changes []SessionChange
-	seen := make(map[string]bool) // 记录本轮查询到的 ID，用于清理已删除的 session
+	seen := make(map[string]bool)
+	totalRows := 0
+	changedCount := 0
+	notifiedCount := 0
 
 	for rows.Next() {
+		totalRows++
 		var s SessionInfo
 		var createdAt, updatedAt, lastActivityAt sql.NullInt64
 		var title, customTitle, status, cwd, expertID, model sql.NullString
@@ -87,7 +110,7 @@ func (m *SessionMonitor) Refresh() []SessionChange {
 		err := rows.Scan(&s.ID, &title, &customTitle, &status, &cwd,
 			&expertID, &model, &createdAt, &updatedAt, &lastActivityAt)
 		if err != nil {
-			log.Printf("扫描行失败 (session=%s): %v", s.ID, err)
+			log.Printf("[Monitor] 扫描行失败 (session=%s): %v", s.ID, err)
 			continue
 		}
 
@@ -107,55 +130,98 @@ func (m *SessionMonitor) Refresh() []SessionChange {
 			s.LastActivityAt = time.UnixMilli(lastActivityAt.Int64)
 		}
 
+		sid := s.ID
+		if len(sid) > 8 {
+			sid = sid[:8]
+		}
+
 		seen[s.ID] = true
 		prevStatus, existed := m.states[s.ID]
 
-		if existed && prevStatus != s.Status {
-			// 状态变化
+		if !existed {
+			// ── 第一次见到这个 session ──
+			m.states[s.ID] = s.Status
+
+			if m.firstPoll {
+				// 第一轮：只建基线，不通知（历史数据）
+				log.Printf("[Monitor] 📋 基线建立: status=%s  session=%s  title=%q",
+					s.Status, sid, getDisplayTitle(s, ""))
+			} else {
+				// 非第一轮中途出现的新 session，已是终态 → 说明两轮之间跑完了，通知
+				log.Printf("[Monitor] 🆕 新 session: status=%s  session=%s  title=%q",
+					s.Status, sid, getDisplayTitle(s, ""))
+				if isTerminalStatus(s.Status) {
+					change := SessionChange{
+						SessionInfo:    s,
+						PreviousStatus: "working",
+					}
+					dur := ""
+					if !s.CreatedAt.IsZero() && !s.UpdatedAt.IsZero() {
+						dur = " 耗时=" + formatDuration(s.UpdatedAt.Sub(s.CreatedAt))
+					}
+					log.Printf("[Monitor] ✅ 新 session 即终态 → 触发通知: status=%s  session=%s%s  title=%q",
+						s.Status, sid, dur, getDisplayTitle(s, ""))
+					changes = append(changes, change)
+					notifiedCount++
+				}
+			}
+			changedCount++
+			continue
+		}
+
+		// ── 已经见过的 session ──
+		if prevStatus == s.Status {
+			// 状态未变化：静默跳过，不打日志（避免刷屏）
+			continue
+		}
+
+		// ── 状态发生变化 ──
+		changedCount++
+		m.states[s.ID] = s.Status
+		prevShort := prevStatus
+		if len(prevShort) > 12 {
+			prevShort = prevShort[:12]
+		}
+
+		if isTerminalStatus(s.Status) {
 			change := SessionChange{
 				SessionInfo:    s,
 				PreviousStatus: prevStatus,
 			}
-			m.states[s.ID] = s.Status
-
-			// 只要变成 completed / failed / error 就通知
-			if (s.Status == "completed" || s.Status == "failed" || s.Status == "error") {
-				log.Printf("状态变更: %s → %s [%s]",
-					prevStatus, s.Status, getDisplayTitle(s, ""))
-				changes = append(changes, change)
-			} else {
-				log.Printf("状态变更(不通知): %s → %s [%s]",
-					prevStatus, s.Status, getDisplayTitle(s, ""))
-			}
+			log.Printf("[Monitor] ✅ 状态变更 → 触发通知: %s→%s  session=%s  title=%q",
+				prevShort, s.Status, sid, getDisplayTitle(s, ""))
+			changes = append(changes, change)
+			notifiedCount++
 		} else {
-			// 新增的 session（或者是轮询中间产生的 session）
-			m.states[s.ID] = s.Status
-
-			// 如果新增时已经是完成/失败状态，且 created_at == updated_at，
-			// 说明它可能在两次轮询之间跑完了，也通知一下
-			if (s.Status == "completed" || s.Status == "failed" || s.Status == "error") &&
-				!existed &&
-				!s.CreatedAt.IsZero() && !s.UpdatedAt.IsZero() &&
-				s.UpdatedAt.Sub(s.CreatedAt) > time.Second {
-				// 只通知那些确实花了一段时间的任务（排除瞬间完成的，可能是旧数据）
-				change := SessionChange{
-					SessionInfo:    s,
-					PreviousStatus: "working", // 推测
-				}
-				log.Printf("新增已完成: %s [%s] (耗时 %s)",
-					s.Status, getDisplayTitle(s, ""),
-					formatDuration(s.UpdatedAt.Sub(s.CreatedAt)))
-				changes = append(changes, change)
-			}
+			log.Printf("[Monitor] 🔄 状态变更 → 不通知: %s→%s  session=%s  title=%q",
+				prevShort, s.Status, sid, getDisplayTitle(s, ""))
 		}
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("[Monitor] 遍历 rows 出错: %v", err)
+	}
+
+	// 第一轮结束，后续轮询开始正常通知
+	if m.firstPoll {
+		m.firstPoll = false
+		log.Printf("[Monitor] 第一轮基线建立完成，states=%d 条，后续轮询将正常触发通知", len(m.states))
 	}
 
 	// 清理已经从数据库消失的 session（被删除了）
 	for id := range m.states {
 		if !seen[id] {
+			sid := id
+			if len(sid) > 8 {
+				sid = sid[:8]
+			}
+			log.Printf("[Monitor] 🗑️  session 已消失（被删除）: session=%s", sid)
 			delete(m.states, id)
 		}
 	}
+
+	log.Printf("[Monitor] 本轮扫描: 共 %d 条 session，states 缓存 %d 条，状态变化 %d 条，触发通知 %d 条",
+		totalRows, len(m.states), changedCount, notifiedCount)
 
 	return changes
 }

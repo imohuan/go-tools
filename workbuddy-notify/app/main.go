@@ -149,11 +149,16 @@ func startMonitor(cfg *Config) {
 
 	log.Println("开始监听 session 状态变化...")
 
+	pollCount := 0
 	for range ticker.C {
+		pollCount++
+		log.Printf("[Monitor] 🔃 第 %d 次轮询...", pollCount)
 		changes := monitor.Refresh()
 		if len(changes) == 0 {
+			log.Printf("[Monitor] 本轮无变更")
 			continue
 		}
+		log.Printf("[Monitor] 本轮发现 %d 个变更，开始发送通知", len(changes))
 		for _, change := range changes {
 			switch change.Status {
 			case "completed":
